@@ -6,8 +6,11 @@
     "kubernetes-helm@4.2.3",
     "fluxcd@2.9.3",
     "google-cloud-sdk@570.0.0",
+    "path:gcloud#google-cloud-sdk",
     "gh@2.97.0",
     "jq@1.8.2",
+    "curl@8.17.0",
+    "hey@0.1.4",
     "yq-go@4.53.3",
     "git@2.55.0"
   ],

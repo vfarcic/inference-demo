@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: inference
+spec:
+  replicas: 1
+  # There is one GPU. With the default RollingUpdate the replacement Pod can
+  # never schedule, because the outgoing Pod still holds the only accelerator,
+  # and the rollout hangs forever. Recreate tears the old one down first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: silly-model
+      engine: vllm
+  template:
+    metadata:
+      labels:
+        # `app: silly-model` is what the Service and Ingress select on, and it stays
+        # the same whichever engine is deployed. `engine` is informational.
+        app: silly-model
+        engine: vllm
+    spec:
+      # Kubernetes injects legacy service-link variables like SILLY_MODEL_PORT
+      # for every Service in the namespace. vLLM reads VLLM_PORT as its own
+      # config, so a Service named `vllm` makes the engine fail to start with
+      # "VLLM_PORT appears to be a URI". Turning the injection off avoids the
+      # whole class of collision, whatever the Services end up being called.
+      enableServiceLinks: false
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.27.1
+          args:
+            - --model
+            - Qwen/Qwen3-8B
+            - --quantization
+            - fp8
+            - --kv-cache-dtype
+            - fp8
+            - --gpu-memory-utilization
+            - "0.90"
+            - --max-model-len
+            - "8192"
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 15
+            failureThreshold: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: silly-model
+  namespace: inference
+spec:
+  selector:
+    app: silly-model
+  ports:
+    - port: 8000
+      targetPort: http

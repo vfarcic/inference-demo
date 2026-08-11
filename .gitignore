@@ -1,6 +1,8 @@
 .env
 kubeconfig*.yaml
+gke_gcloud_auth_plugin_cache
 flux/
 .devbox/
 .DS_Store
 *.log
+demo/ingress.yaml

@@ -575,14 +575,58 @@ def --env "create gke" [
         $vm_size = "e2-standard-8"
     }
 
-    (
-        gcloud container clusters create $name --project $project_id
-            --zone us-east1-b --machine-type $vm_size
-            --enable-autoscaling --num-nodes $min_nodes
-            --min-nodes $min_nodes --max-nodes $max_nodes
-            --enable-network-policy --no-enable-autoupgrade
-            --gateway-api=standard
-    )
+    # `gcloud services enable` returns before the API is actually usable, so
+    # cluster creation can fail with a 403 for a minute or two afterwards.
+    # Retry until it takes. Closures cannot capture mutable variables, hence the
+    # immutable copies.
+    let pid = $project_id
+    let size = $vm_size
+
+    mut attempt = 0
+    mut created = false
+
+    while (not $created) and ($attempt < 10) {
+
+        $attempt = $attempt + 1
+
+        # `complete` captures the exit code. Do not pipe to `ignore` here: it is
+        # a successful command in its own right and resets LAST_EXIT_CODE to 0,
+        # which makes a 404 look like the cluster already exists.
+        let existing = (
+            do --ignore-errors {
+                gcloud container clusters describe $name --project $pid --zone us-east1-b
+            } | complete
+        )
+
+        if $existing.exit_code == 0 {
+            $created = true
+            break
+        }
+
+        do --ignore-errors {
+            (
+                gcloud container clusters create $name --project $pid
+                    --zone us-east1-b --machine-type $size
+                    --enable-autoscaling --num-nodes $min_nodes
+                    --min-nodes $min_nodes --max-nodes $max_nodes
+                    --enable-network-policy --no-enable-autoupgrade
+                    --gateway-api=standard
+            )
+        }
+
+        if $env.LAST_EXIT_CODE == 0 {
+            $created = true
+        } else {
+            print $"(ansi yellow_bold)Cluster creation failed(ansi reset). The Kubernetes Engine API may still be propagating. Retrying in 30 seconds \(attempt ($attempt) of 10\)."
+            sleep 30sec
+        }
+
+    }
+
+    if not $created {
+        print $"(ansi red_bold)Could not create the cluster(ansi reset) after ($attempt) attempts."
+        exit 1
+    }
 
     # Pre-create empty kubeconfig file to prevent gcloud from creating a directory
     touch $env.KUBECONFIG
