@@ -1,0 +1,6 @@
+.env
+kubeconfig*.yaml
+flux/
+.devbox/
+.DS_Store
+*.log

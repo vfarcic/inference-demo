@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "packages": [
+    "nushell@0.114.1",
+    "kubectl@1.36.3",
+    "kubernetes-helm@4.2.3",
+    "fluxcd@2.9.3",
+    "google-cloud-sdk@570.0.0",
+    "gh@2.97.0",
+    "jq@1.8.2",
+    "yq-go@4.53.3",
+    "git@2.55.0"
+  ],
+  "shell": {
+    "init_hook": [
+      "export PATH=\"$HOME/.local/bin:$PATH\"",
+      "[ -f .env ] && source ./.env || true"
+    ],
+    "scripts": {}
+  }
+}
