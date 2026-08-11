@@ -4,33 +4,33 @@ source scripts/kubernetes.nu
 source scripts/common.nu
 source scripts/flux.nu
 
+# Each episode of the series gets its own `setup` and `destroy` subcommand.
+# Once an episode is published its command is frozen, since the video shows it.
+# Later episodes add new subcommands that build on the earlier ones instead of
+# changing them.
+
+const CLUSTER_NAME = "inference"
+const ZONE = "us-east1-b"
+const MIN_NODES = 2
+const MAX_NODES = 3
+const GPU_MACHINE_TYPE = "g2-standard-8"
+const GPU_ACCELERATOR = "nvidia-l4"
+const GPU_MIN_NODES = 0
+const GPU_MAX_NODES = 1
+
 def main [] {}
 
-# Creates the cluster used by the inference series
+# Creates the cluster used by the inference engine episode
 #
-# The cluster has two node pools. The general pool runs system workloads like
-# Flux and observability. The GPU pool is tainted so only inference workloads
-# land on it, which means it can be recreated or scaled to zero without taking
-# the rest of the cluster down.
+# Two node pools. The general pool runs system workloads like Flux. The GPU pool
+# is tainted so only inference workloads land on it, which means it can be
+# recreated or scaled to zero without taking the rest of the cluster down.
 #
 # Examples:
-# > ./dot.nu setup
-# > ./dot.nu setup --gpu-max-nodes 2 --git-ref episode-1 --git-ref-type tag
-def --env "main setup" [
-    --provider = "google",              # Cloud provider. Only `google` is supported for now
-    --name = "inference",               # Name of the cluster
-    --billing-account = "",             # Billing account to link. Auto-detected when empty
-    --zone = "us-east1-b",              # Zone the cluster and the GPU pool live in
-    --min-nodes = 2,                    # Minimum number of general purpose nodes
-    --max-nodes = 3,                    # Maximum number of general purpose nodes
-    --gpu-machine-type = "g2-standard-8",  # Machine type for the GPU pool
-    --gpu-accelerator = "nvidia-l4",    # Accelerator attached to each GPU node
-    --gpu-min-nodes = 0,                # Minimum GPU nodes. Zero enables scale to zero
-    --gpu-max-nodes = 1,                # Maximum GPU nodes
-    --flux-enabled = true,              # Whether to install Flux
-    --flux-sync = true,                 # Whether Flux syncs this repository
-    --git-ref = "main",                 # Branch, tag, or commit Flux reconciles
-    --git-ref-type = "branch"           # Type of the ref. `branch`, `tag`, or `commit`
+# > ./dot.nu setup inference google
+def --env "main setup inference" [
+    provider: string          # Cloud provider. Only `google` is supported for now
+    --billing-account = ""    # Billing account to link. Auto-detected when empty
 ] {
 
     if $provider != "google" {
@@ -45,35 +45,35 @@ def --env "main setup" [
     hide-env --ignore-errors PROJECT_ID
 
     (
-        main create kubernetes google --name $name --auth false
+        main create kubernetes google --name $CLUSTER_NAME --auth false
             --billing-account $billing_account
-            --min-nodes $min_nodes --max-nodes $max_nodes --node-size small
+            --min-nodes $MIN_NODES --max-nodes $MAX_NODES --node-size small
     )
 
     (
-        main create gpu_nodes google --cluster-name $name --zone $zone
-            --machine-type $gpu_machine_type --accelerator $gpu_accelerator
-            --min-nodes $gpu_min_nodes --max-nodes $gpu_max_nodes
+        main create gpu_nodes google --cluster-name $CLUSTER_NAME --zone $ZONE
+            --machine-type $GPU_MACHINE_TYPE --accelerator $GPU_ACCELERATOR
+            --min-nodes $GPU_MIN_NODES --max-nodes $GPU_MAX_NODES
     )
 
-    if $flux_enabled {
-        (
-            main apply flux --sync $flux_sync --path kubernetes
-                --git-ref $git_ref --git-ref-type $git_ref_type
-        )
-    }
+    let branch = (git rev-parse --abbrev-ref HEAD | str trim)
+
+    main apply flux --path kubernetes --git-ref $branch --git-ref-type branch
+
+    main wait flux
 
     main print source
 
 }
 
-# Destroys the cluster and removes generated files
+# Destroys the cluster created for the inference engine episode
+#
+# Deletes the cluster and the project that was created during setup.
 #
 # Examples:
-# > ./dot.nu destroy
-def --env "main destroy" [
-    --provider = "google",   # Cloud provider. Only `google` is supported for now
-    --name = "inference"     # Name of the cluster
+# > ./dot.nu destroy inference google
+def --env "main destroy inference" [
+    provider: string   # Cloud provider. Only `google` is supported for now
 ] {
 
     if $provider != "google" {
@@ -87,10 +87,10 @@ def --env "main destroy" [
     }
 
     if not ("KUBECONFIG" in $env) {
-        $env.KUBECONFIG = $"($env.PWD)/kubeconfig-($name).yaml"
+        $env.KUBECONFIG = $"($env.PWD)/kubeconfig-($CLUSTER_NAME).yaml"
     }
 
-    main destroy kubernetes google --name $name
+    main destroy kubernetes google --name $CLUSTER_NAME
 
     main delete temp_files
 

@@ -2,7 +2,11 @@
 
 Companion repository for the DevOps Toolkit series on running LLM inference on Kubernetes.
 
-Each episode has a tag. Check out the tag for the episode you are watching, and the setup below reconstitutes exactly that state.
+Every episode has its own `setup` and `destroy` subcommand, and they all live on `main`. Clone the repository, run the subcommand for the episode you are watching, and you get the full stack up to that point. There is nothing to check out.
+
+Run `./dot.nu --help` to see the available episodes.
+
+Each published episode also has a branch named after its subcommand, frozen at the state used in the video. You should not need it. It is there in case something on `main` drifts away from what an older episode demonstrated, and it is where fixes for already-published episodes go.
 
 ## Setup
 
@@ -25,7 +29,7 @@ gcloud auth login
 
 chmod +x dot.nu
 
-./dot.nu setup
+./dot.nu setup inference google
 
 source .env
 ```
@@ -44,7 +48,7 @@ That split matters. Comparing inference engines fairly means recreating the GPU 
 ## Destroy
 
 ```sh
-./dot.nu destroy
+./dot.nu destroy inference google
 ```
 
 This deletes the cluster and then the project that was created during setup.
