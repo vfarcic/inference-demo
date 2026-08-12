@@ -12,11 +12,29 @@ def --env "main apply ingress" [
 
     if $class == "traefik" {
 
-        (
-            helm upgrade --install traefik traefik
-                --repo https://helm.traefik.io/traefik
-                --namespace traefik --create-namespace --wait
-        )
+        mut args = [
+            traefik traefik
+            --repo https://helm.traefik.io/traefik
+            --namespace traefik --create-namespace --wait
+        ]
+
+        if $provider == "aws" {
+            # AWS classic load balancers close idle connections after 60
+            # seconds. A non-streaming request to a model can take minutes to
+            # produce its first byte, so the connection looks idle the whole
+            # time and the balancer kills it. Every request comes back as EOF.
+            # Google's L4 balancer defaults to ten minutes, which is why this
+            # only shows up on AWS. 4000 seconds is the documented maximum.
+            # `--set-string`, not `--set`. Annotation values must be strings and
+            # helm otherwise coerces this to a number, which the API server
+            # rejects with "cannot unmarshal number into ... of type string".
+            $args = ($args | append [
+                --set-string
+                "service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-connection-idle-timeout=4000"
+            ])
+        }
+
+        helm upgrade --install ...$args
 
     } else if $class == "contour" {
 
@@ -97,7 +115,7 @@ def "main get ingress" [
                 kubectl --namespace $class
                     get service $service_name --output yaml
                     | from yaml
-                    | get --ignore-errors status.loadBalancer.ingress.0.hostname
+                    | get status.loadBalancer.ingress?.0?.hostname?
                     | default ""
             )
         }
@@ -129,7 +147,7 @@ def "main get ingress" [
                 kubectl --namespace $class
                     get service $service_name --output yaml
                     | from yaml
-                    | get --ignore-errors status.loadBalancer.ingress.0.ip
+                    | get status.loadBalancer.ingress?.0?.ip?
                     | default ""
             )
 

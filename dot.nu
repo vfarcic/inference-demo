@@ -14,8 +14,8 @@ const CLUSTER_NAME = "inference"
 const ZONE = "us-east1-b"
 const MIN_NODES = 2
 const MAX_NODES = 3
-const GPU_MACHINE_TYPE = "g2-standard-8"
-const GPU_ACCELERATOR = "nvidia-l4"
+# Machine type is resolved per provider by `main create gpu_nodes`: a single
+# NVIDIA L4 on both Google and AWS.
 # Starts at 1, not 0. Scaling from zero works, but it means the GPU node is
 # absent right after setup and the first demo command waits minutes for one.
 # Recreating the node between engines is done deliberately instead of relying on
@@ -39,8 +39,8 @@ def --env "main setup inference" [
     --auth = true             # Whether to authenticate. Set to false if already logged in
 ] {
 
-    if $provider != "google" {
-        print $"(ansi red_bold)($provider)(ansi reset) is not supported yet. Use `google`."
+    if not ($provider in ["google" "aws"]) {
+        print $"(ansi red_bold)($provider)(ansi reset) is not supported yet. Use `google` or `aws`."
         exit 1
     }
 
@@ -62,13 +62,12 @@ def --env "main setup inference" [
 
     (
         main create gpu_nodes $provider --cluster-name $CLUSTER_NAME --zone $ZONE
-            --machine-type $GPU_MACHINE_TYPE --accelerator $GPU_ACCELERATOR
             --min-nodes $GPU_MIN_NODES --max-nodes $GPU_MAX_NODES
     )
 
-    main apply ingress traefik --provider $provider
+    let ingress = (main apply ingress traefik --provider $provider)
 
-    main generate ingress
+    main generate ingress --host $ingress.host
 
     let branch = (git rev-parse --abbrev-ref HEAD | str trim)
 
@@ -96,12 +95,20 @@ def --env "main setup inference" [
 def "main generate ingress" [
     --name = "silly-model",   # Name of the Ingress, Service, and host prefix
     --port = 8000,            # Port the Service listens on
-    --class = "traefik"       # Ingress class
+    --class = "traefik",      # Ingress class
+    --host = ""               # Ingress host. Falls back to $INGRESS_HOST
 ] {
 
-    if not ("INGRESS_HOST" in $env) {
-        print $"(ansi red_bold)INGRESS_HOST is not set(ansi reset). Execute `source .env` first."
-        exit 1
+    # `main get ingress` writes INGRESS_HOST to the .env file but cannot set it
+    # in the running process, so setup has to pass the value straight through.
+    mut ingress_host = $host
+
+    if $ingress_host == "" {
+        if not ("INGRESS_HOST" in $env) {
+            print $"(ansi red_bold)INGRESS_HOST is not set(ansi reset). Pass --host, or execute `source .env` first."
+            exit 1
+        }
+        $ingress_host = $env.INGRESS_HOST
     }
 
     {
@@ -114,7 +121,7 @@ def "main generate ingress" [
         spec: {
             ingressClassName: $class
             rules: [{
-                host: $"($name).($env.INGRESS_HOST)"
+                host: $"($name).($ingress_host)"
                 http: {
                     paths: [{
                         path: "/"
@@ -131,7 +138,7 @@ def "main generate ingress" [
         }
     } | to yaml | save demo/ingress.yaml --force
 
-    print $"Wrote (ansi yellow_bold)demo/ingress.yaml(ansi reset) for host ($name).($env.INGRESS_HOST)"
+    print $"Wrote (ansi yellow_bold)demo/ingress.yaml(ansi reset) for host ($name).($ingress_host)"
 
 }
 
@@ -145,12 +152,14 @@ def --env "main destroy inference" [
     provider: string   # Cloud provider. Only `google` is supported for now
 ] {
 
-    if $provider != "google" {
-        print $"(ansi red_bold)($provider)(ansi reset) is not supported yet. Use `google`."
+    if not ($provider in ["google" "aws"]) {
+        print $"(ansi red_bold)($provider)(ansi reset) is not supported yet. Use `google` or `aws`."
         exit 1
     }
 
-    if not ("PROJECT_ID" in $env) {
+    # Only Google has a project to delete. AWS keeps its state in the eksctl
+    # config file that setup wrote.
+    if ($provider == "google") and (not ("PROJECT_ID" in $env)) {
         print $"(ansi red_bold)PROJECT_ID is not set(ansi reset). Execute `source .env` first."
         exit 1
     }
@@ -158,6 +167,13 @@ def --env "main destroy inference" [
     if not ("KUBECONFIG" in $env) {
         $env.KUBECONFIG = $"($env.PWD)/kubeconfig-($CLUSTER_NAME).yaml"
     }
+
+    # The load balancer behind the Ingress is created by the cloud controller
+    # rather than by the cluster tooling, so deleting the cluster leaves it
+    # running and paid for. On AWS it also holds network interfaces in the
+    # subnets, which blocks the VPC from being deleted at all. Remove the
+    # Service first, while the cluster is still alive to process it.
+    do --ignore-errors { main delete ingress traefik }
 
     main destroy kubernetes $provider --name $CLUSTER_NAME
 

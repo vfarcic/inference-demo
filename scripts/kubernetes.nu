@@ -109,15 +109,23 @@ def --env "main create gpu_nodes" [
     provider: string  # The Kubernetes provider to use (google, aws, azure)
     --cluster-name = "dot"  # Name of the Kubernetes cluster to add the pool to
     --name = "gpu"  # Name of the node pool
-    --machine-type = "g2-standard-8"  # Machine type backing the pool
-    --accelerator = "nvidia-l4"  # Accelerator attached to each node
-    --accelerator-count = 1  # Accelerators per node
+    --machine-type = ""  # Machine type backing the pool. Defaults per provider
+    --accelerator = "nvidia-l4"  # Accelerator attached to each node. Google only
+    --accelerator-count = 1  # Accelerators per node. Google only
     --num-nodes = 1  # Number of nodes to start with
     --min-nodes = 0  # Minimum number of nodes. Zero enables scale to zero
     --max-nodes = 1  # Maximum number of nodes
-    --zone = "us-east1-b"  # Zone the cluster lives in
+    --zone = "us-east1-b"  # Zone the cluster lives in. Google only
+    --region = "us-east-1"  # Region the cluster lives in. AWS only
     --taint = true  # Whether to taint the pool so only GPU workloads schedule on it
 ] {
+
+    # Both defaults are a single NVIDIA L4 with 8 vCPUs and 32 GB of RAM, so the
+    # two providers give the same machine. Azure has no L4 equivalent.
+    mut size = $machine_type
+    if $size == "" {
+        $size = (if $provider == "aws" { "g6.2xlarge" } else { "g2-standard-8" })
+    }
 
     if $provider == "google" {
 
@@ -138,7 +146,7 @@ def --env "main create gpu_nodes" [
             --cluster $cluster_name
             --project $project_id
             --zone $zone
-            --machine-type $machine_type
+            --machine-type $size
             --accelerator $"type=($accelerator),count=($accelerator_count),gpu-driver-version=latest"
             --num-nodes $num_nodes
             --enable-autoscaling
@@ -153,9 +161,52 @@ def --env "main create gpu_nodes" [
 
         gcloud container node-pools create ...$args
 
-    } else if $provider in ["aws" "azure"] {
+    } else if $provider == "aws" {
 
-        print $"(ansi red_bold)($provider)(ansi reset) is not implemented yet. Only `google` is supported."
+        # eksctl installs the NVIDIA device plugin itself once it sees a GPU
+        # instance type, so there is no driver argument to pass here.
+        mut node_group = {
+            name: $name
+            instanceType: $size
+            minSize: $min_nodes
+            maxSize: $max_nodes
+            desiredCapacity: $num_nodes
+            iam: {
+                withAddonPolicies: {
+                    autoScaler: true
+                    ebs: true
+                }
+            }
+        }
+
+        if $taint {
+            $node_group = ($node_group | merge {
+                taints: [{
+                    key: "nvidia.com/gpu"
+                    value: "present"
+                    effect: "NoSchedule"
+                }]
+            })
+        }
+
+        {
+            apiVersion: "eksctl.io/v1alpha5"
+            kind: "ClusterConfig"
+            metadata: {
+                name: $cluster_name
+                region: $region
+            }
+            managedNodeGroups: [$node_group]
+        } | to yaml | save $"eksctl-nodegroup-($cluster_name).yaml" --force
+
+        (
+            eksctl create nodegroup
+                --config-file $"eksctl-nodegroup-($cluster_name).yaml"
+        )
+
+    } else if $provider == "azure" {
+
+        print $"(ansi red_bold)azure(ansi reset) is not implemented yet. Azure has no L4 equivalent, and its A10 and T4 GPUs do not support FP8 natively."
         exit 1
 
     } else {
@@ -221,11 +272,25 @@ def "main destroy kubernetes" [
                 --cluster $name --region $region
         )
 
-        (
-            eksctl delete nodegroup --name primary
-                --cluster $name --drain=false
-                --region $region --parallel 10 --wait
+        # Deletes every node group rather than just `primary`, since clusters
+        # can carry extra pools such as GPU nodes. Cluster deletion would
+        # normally sweep them up, but doing it explicitly keeps the failure
+        # modes obvious rather than leaving instances behind if that stalls.
+        let node_groups = (
+            do --ignore-errors {
+                eksctl get nodegroup --cluster $name --region $region --output json
+            } | complete
         )
+
+        if $node_groups.exit_code == 0 {
+            for group in ($node_groups.stdout | from json | get Name) {
+                (
+                    eksctl delete nodegroup --name $group
+                        --cluster $name --drain=false
+                        --region $region --parallel 10 --wait
+                )
+            }
+        }
 
         (
             eksctl delete cluster

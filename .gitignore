@@ -6,3 +6,6 @@ flux/
 .DS_Store
 *.log
 demo/ingress.yaml
+aws-creds.conf
+eksctl-config-*.yaml
+eksctl-nodegroup-*.yaml
