@@ -22,7 +22,7 @@ cd inference-demo
 devbox shell
 ```
 
-> The setup currently works only with Google Cloud. Support for AWS and Azure is not implemented yet.
+> The setup supports Google Cloud and AWS. Set `PROVIDER` to `google` or `aws`.
 
 ```sh
 gcloud auth login

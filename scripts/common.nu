@@ -53,8 +53,20 @@ def --env "main get creds" [
 
     if $provider == "google" {
 
-        gcloud auth login
+        # Only log in when there is no active account. `gcloud auth login` opens
+        # a browser unconditionally, which makes re-running setup needlessly
+        # interactive when the session is already valid.
+        let active = (
+            do --ignore-errors {
+                gcloud auth list --filter=status:ACTIVE --format="value(account)"
+            } | complete
+        )
 
+        if ($active.exit_code != 0) or (($active.stdout | str trim) == "") {
+            gcloud auth login
+        } else {
+            print $"Already authenticated as (ansi yellow_bold)($active.stdout | str trim)(ansi reset)."
+        }
 
     } else if $provider == "aws" {
 

@@ -33,8 +33,9 @@ def main [] {}
 #
 # Examples:
 # > ./dot.nu setup inference google
+# > ./dot.nu setup inference aws
 def --env "main setup inference" [
-    provider: string          # Cloud provider. Only `google` is supported for now
+    provider: string          # Cloud provider. `google` or `aws`
     --billing-account = ""    # Billing account to link. Auto-detected when empty
     --auth = true             # Whether to authenticate. Set to false if already logged in
 ] {
@@ -50,8 +51,7 @@ def --env "main setup inference" [
     # that project instead of creating a fresh one.
     hide-env --ignore-errors PROJECT_ID
 
-    # Handles all three providers: `gcloud auth login` for Google, AWS keys from
-    # the environment or a prompt, `az login` for Azure.
+    # `gcloud auth login` for Google, AWS keys from the environment or a prompt.
     if $auth { main get creds $provider }
 
     (
@@ -144,12 +144,13 @@ def "main generate ingress" [
 
 # Destroys the cluster created for the inference engine episode
 #
-# Deletes the cluster and the project that was created during setup.
+# Deletes the cluster and everything setup created around it.
 #
 # Examples:
 # > ./dot.nu destroy inference google
+# > ./dot.nu destroy inference aws
 def --env "main destroy inference" [
-    provider: string   # Cloud provider. Only `google` is supported for now
+    provider: string   # Cloud provider. `google` or `aws`
 ] {
 
     if not ($provider in ["google" "aws"]) {
