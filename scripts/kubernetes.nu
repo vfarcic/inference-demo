@@ -106,6 +106,7 @@ nodeRegistration:
 # Examples:
 # > main create gpu_nodes google --cluster-name dot
 # > main create gpu_nodes google --cluster-name dot --accelerator nvidia-l4 --max-nodes 3
+# > main create gpu_nodes aws --cluster-name dot --zone us-east-1d
 def --env "main create gpu_nodes" [
     provider: string  # The Kubernetes provider to use (google, aws, azure)
     --cluster-name = "dot"  # Name of the Kubernetes cluster to add the pool to
@@ -784,7 +785,7 @@ def --env "create gke" [
 
     (
         main get kubeconfig google --name $name --project-id $project_id
-            --destination $env.KUBECONFIG
+            --zone $cluster_zone --destination $env.KUBECONFIG
     )
 
 }
