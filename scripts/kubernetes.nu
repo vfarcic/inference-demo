@@ -14,6 +14,7 @@ def --env "main create kubernetes" [
     --auth = true  # Whether to perform authentication with the cloud provider
     --enable-ingress = true  # Whether to enable ingress for the kind provider
     --billing-account = ""  # Billing account to link. Google only. Auto-detected when empty
+    --zone = ""  # Zone for the cluster. Defaults per provider
 ] {
 
     $env.KUBECONFIG = $"($env.PWD)/kubeconfig-($name).yaml"
@@ -24,14 +25,14 @@ def --env "main create kubernetes" [
         (
             create gke --name $name --node_size $node_size
                 --min_nodes $min_nodes --max_nodes $max_nodes
-                --auth $auth --billing_account $billing_account
+                --auth $auth --billing_account $billing_account --zone $zone
         )
 
     } else if $provider == "aws" {
 
         (
             create eks  --name $name --node_size $node_size
-                --min_nodes $min_nodes --max_nodes $max_nodes
+                --min_nodes $min_nodes --max_nodes $max_nodes --zone $zone
         )
 
     } else if $provider == "azure" {
@@ -115,7 +116,7 @@ def --env "main create gpu_nodes" [
     --num-nodes = 1  # Number of nodes to start with
     --min-nodes = 0  # Minimum number of nodes. Zero enables scale to zero
     --max-nodes = 1  # Maximum number of nodes
-    --zone = "us-east1-b"  # Zone the cluster lives in. Google only
+    --zone = ""  # Zone for the pool. Defaults per provider
     --region = "us-east-1"  # Region the cluster lives in. AWS only
     --taint = true  # Whether to taint the pool so only GPU workloads schedule on it
 ] {
@@ -128,6 +129,8 @@ def --env "main create gpu_nodes" [
     }
 
     if $provider == "google" {
+
+        let google_zone = if $zone == "" { "us-east1-b" } else { $zone }
 
         mut project_id = ""
         if PROJECT_ID in $env {
@@ -145,7 +148,7 @@ def --env "main create gpu_nodes" [
             $name
             --cluster $cluster_name
             --project $project_id
-            --zone $zone
+            --zone $google_zone
             --machine-type $size
             --accelerator $"type=($accelerator),count=($accelerator_count),gpu-driver-version=latest"
             --num-nodes $num_nodes
@@ -163,11 +166,14 @@ def --env "main create gpu_nodes" [
 
     } else if $provider == "aws" {
 
+        let aws_zone = if $zone == "" { "us-east-1d" } else { $zone }
+
         # eksctl installs the NVIDIA device plugin itself once it sees a GPU
         # instance type, so there is no driver argument to pass here.
         mut node_group = {
             name: $name
             instanceType: $size
+            availabilityZones: [$aws_zone]
             minSize: $min_nodes
             maxSize: $max_nodes
             desiredCapacity: $num_nodes
@@ -202,6 +208,7 @@ def --env "main create gpu_nodes" [
         (
             eksctl create nodegroup
                 --config-file $"eksctl-nodegroup-($cluster_name).yaml"
+                --timeout 45m
         )
 
     } else if $provider == "azure" {
@@ -215,6 +222,80 @@ def --env "main create gpu_nodes" [
         exit 1
 
     }
+
+}
+
+# Recreates a GPU node pool so workloads start without a warm host cache
+#
+# Examples:
+# > main recreate gpu_nodes google --cluster-name dot --zone us-east1-b
+# > main recreate gpu_nodes aws --cluster-name dot --zone us-east-1d
+def --env "main recreate gpu_nodes" [
+    provider: string  # The Kubernetes provider to use (google, aws)
+    --cluster-name = "dot"  # Name of the Kubernetes cluster
+    --name = "gpu"  # Name of the node pool
+    --machine-type = ""  # Machine type backing the pool. Defaults per provider
+    --accelerator = "nvidia-l4"  # Accelerator attached to each node. Google only
+    --accelerator-count = 1  # Accelerators per node. Google only
+    --num-nodes = 1  # Number of nodes to start with
+    --min-nodes = 0  # Minimum number of nodes
+    --max-nodes = 1  # Maximum number of nodes
+    --zone = ""  # Zone for the pool. Defaults per provider
+    --region = "us-east-1"  # Region the cluster lives in. AWS only
+    --taint = true  # Whether to taint the pool
+] {
+
+    if $provider == "google" {
+
+        let google_zone = if $zone == "" { "us-east1-b" } else { $zone }
+        let existing = (
+            do --ignore-errors {
+                (
+                    gcloud container node-pools describe $name
+                        --cluster $cluster_name --zone $google_zone
+                )
+            } | complete
+        )
+
+        if $existing.exit_code == 0 {
+            (
+                gcloud container node-pools delete $name
+                    --cluster $cluster_name --zone $google_zone --quiet
+            )
+        }
+
+    } else if $provider == "aws" {
+
+        let existing = (
+            do --ignore-errors {
+                (
+                    eksctl get nodegroup --name $name --cluster $cluster_name
+                        --region $region --output json
+                )
+            } | complete
+        )
+
+        if $existing.exit_code == 0 {
+            (
+                eksctl delete nodegroup --name $name --cluster $cluster_name
+                    --drain=false --region $region --wait
+            )
+        }
+
+    } else {
+
+        print $"(ansi red_bold)($provider)(ansi reset) is not supported."
+        exit 1
+
+    }
+
+    (
+        main create gpu_nodes $provider --cluster-name $cluster_name --name $name
+            --machine-type $machine_type --accelerator $accelerator
+            --accelerator-count $accelerator_count --num-nodes $num_nodes
+            --min-nodes $min_nodes --max-nodes $max_nodes --zone $zone
+            --region $region --taint $taint
+    )
 
 }
 
@@ -267,10 +348,12 @@ def "main destroy kubernetes" [
 
         let region = "us-east-1"
 
-        (
-            eksctl delete addon --name aws-ebs-csi-driver
-                --cluster $name --region $region
-        )
+        do --ignore-errors {
+            (
+                eksctl delete addon --name aws-ebs-csi-driver
+                    --cluster $name --region $region
+            )
+        }
 
         # Deletes every node group rather than just `primary`, since clusters
         # can carry extra pools such as GPU nodes. Cluster deletion would
@@ -599,7 +682,10 @@ def --env "create gke" [
     --node_size = "small" # Supported values: small, medium, large
     --auth = true  # Whether to perform authentication with Google Cloud
     --billing_account = ""  # Billing account to link. Auto-detected when empty
+    --zone = ""  # Zone for the cluster
 ] {
+
+    let cluster_zone = if $zone == "" { "us-east1-b" } else { $zone }
 
     if $auth {
         gcloud auth login
@@ -659,7 +745,7 @@ def --env "create gke" [
         # which makes a 404 look like the cluster already exists.
         let existing = (
             do --ignore-errors {
-                gcloud container clusters describe $name --project $pid --zone us-east1-b
+                gcloud container clusters describe $name --project $pid --zone $cluster_zone
             } | complete
         )
 
@@ -671,7 +757,7 @@ def --env "create gke" [
         do --ignore-errors {
             (
                 gcloud container clusters create $name --project $pid
-                    --zone us-east1-b --machine-type $size
+                    --zone $cluster_zone --machine-type $size
                     --enable-autoscaling --num-nodes $min_nodes
                     --min-nodes $min_nodes --max-nodes $max_nodes
                     --enable-network-policy --no-enable-autoupgrade
@@ -712,9 +798,12 @@ def --env "create eks" [
     --min_nodes = 2,  # Minimum number of nodes in the cluster
     --max_nodes = 4,  # Maximum number of nodes in the cluster
     --node_size = "small" # Supported values: small, medium, large
+    --zone = ""  # Preferred zone for GPU-capable subnets
 ] {
 
     let region = "us-east-1"
+    let primary_zone = if $zone == "" { "us-east-1d" } else { $zone }
+    let secondary_zone = if $primary_zone == "us-east-1c" { "us-east-1d" } else { "us-east-1c" }
 
     mut aws_access_key_id = ""
     if AWS_ACCESS_KEY_ID in $env {
@@ -760,6 +849,10 @@ aws_secret_access_key = ($aws_secret_access_key)
             name: $name
             region: $region
             version: "1.34"
+        }
+        availabilityZones: [$primary_zone $secondary_zone]
+        autoModeConfig: {
+            enabled: false
         }
         managedNodeGroups: [{
             name: "primary"

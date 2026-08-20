@@ -1,0 +1,13 @@
+{
+  "model": "qwen3-8b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Explain what a KV cache is."
+    }
+  ],
+  "temperature": 0,
+  "seed": 42,
+  "max_tokens": 256,
+  "stream": false
+}

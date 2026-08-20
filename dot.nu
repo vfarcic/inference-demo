@@ -12,6 +12,7 @@ source scripts/ingress.nu
 
 const CLUSTER_NAME = "inference"
 const ZONE = "us-east1-b"
+const AWS_ZONE = "us-east-1d"
 const MIN_NODES = 2
 const MAX_NODES = 3
 # Machine type is resolved per provider by `main create gpu_nodes`: a single
@@ -54,14 +55,17 @@ def --env "main setup inference" [
     # `gcloud auth login` for Google, AWS keys from the environment or a prompt.
     if $auth { main get creds $provider }
 
+    let zone = if $provider == "aws" { $AWS_ZONE } else { $ZONE }
+
     (
         main create kubernetes $provider --name $CLUSTER_NAME --auth false
             --billing-account $billing_account
             --min-nodes $MIN_NODES --max-nodes $MAX_NODES --node-size small
+            --zone $zone
     )
 
     (
-        main create gpu_nodes $provider --cluster-name $CLUSTER_NAME --zone $ZONE
+        main create gpu_nodes $provider --cluster-name $CLUSTER_NAME --zone $zone
             --min-nodes $GPU_MIN_NODES --max-nodes $GPU_MAX_NODES
     )
 
@@ -80,6 +84,110 @@ def --env "main setup inference" [
     kubectl apply --filename demo/gpu-info.yaml
 
     main print source
+
+}
+
+# Creates the cluster used by the inference engine comparison episode
+#
+# Builds on the infrastructure introduced in the inference episode while giving
+# this episode its own command, which can be frozen independently once published.
+#
+# Examples:
+# > ./dot.nu setup engines google
+# > ./dot.nu setup engines aws
+def --env "main setup engines" [
+    provider: string          # Cloud provider. `google` or `aws`
+    --billing-account = ""    # Billing account to link. Auto-detected when empty
+    --auth = true             # Whether to authenticate. Set to false if already logged in
+] {
+
+    (
+        main setup inference $provider --billing-account $billing_account
+            --auth $auth
+    )
+
+    kubectl apply --filename demo/ingress.yaml
+
+}
+
+# Makes one inference engine the active server for Qwen3-8B
+#
+# Removes the current serving workload, recreates the GPU node to clear its host
+# cache, deploys the requested engine, waits for the model, and warms it once.
+# The measured load test remains a separate, visible command.
+#
+# Examples:
+# > ./dot.nu use engine ollama-default aws
+# > ./dot.nu use engine vllm-default google
+def --env "main use engine" [
+    engine: string            # Engine configuration. `ollama-default` or `vllm-default`
+    provider: string          # Cloud provider. `google` or `aws`
+] {
+
+    if not ($provider in ["google" "aws"]) {
+        print $"(ansi red_bold)($provider)(ansi reset) is not supported. Use `google` or `aws`."
+        exit 1
+    }
+
+    if not ($engine in ["ollama-default" "vllm-default"]) {
+        print $"(ansi red_bold)($engine)(ansi reset) is not supported. Use `ollama-default` or `vllm-default`."
+        exit 1
+    }
+
+    if not ("INGRESS_HOST" in $env) {
+        print $"(ansi red_bold)INGRESS_HOST is not set(ansi reset). Execute `source .env` first."
+        exit 1
+    }
+
+    (
+        kubectl --namespace inference delete deployment
+            --selector app=silly-model --ignore-not-found=true --wait=true
+    )
+    (
+        kubectl --namespace inference delete service
+            --selector app=silly-model --ignore-not-found=true
+    )
+
+    let zone = if $provider == "aws" { $AWS_ZONE } else { $ZONE }
+    (
+        main recreate gpu_nodes $provider --cluster-name $CLUSTER_NAME
+            --zone $zone --min-nodes $GPU_MIN_NODES
+            --max-nodes $GPU_MAX_NODES
+    )
+
+    kubectl apply --filename $"demo/($engine).yaml"
+
+    let deployment = if $engine == "ollama-default" { "ollama" } else { "vllm" }
+    (
+        kubectl --namespace inference rollout status
+            $"deployment/($deployment)" --timeout 45m
+    )
+
+    if $engine == "ollama-default" {
+        (
+            kubectl --namespace inference exec deployment/ollama
+                -- ollama pull qwen3:8b
+        )
+        (
+            kubectl --namespace inference exec deployment/ollama
+                -- ollama cp qwen3:8b qwen3-8b
+        )
+    }
+
+    let response = (
+        curl --fail --silent --show-error
+            --header "Content-Type: application/json"
+            --data-binary "@demo/request.json"
+            $"http://silly-model.($env.INGRESS_HOST)/v1/chat/completions"
+        | from json
+    )
+
+    if (($response | get choices? | default [] | length) == 0) {
+        print $"(ansi red_bold)The warm-up request did not return a completion.(ansi reset)"
+        exit 1
+    }
+
+    print $"(ansi green_bold)($engine) is ready and warm.(ansi reset)"
 
 }
 
@@ -179,5 +287,18 @@ def --env "main destroy inference" [
     main destroy kubernetes $provider --name $CLUSTER_NAME
 
     main delete temp_files
+
+}
+
+# Destroys the cluster created for the inference engine comparison episode
+#
+# Examples:
+# > ./dot.nu destroy engines google
+# > ./dot.nu destroy engines aws
+def --env "main destroy engines" [
+    provider: string   # Cloud provider. `google` or `aws`
+] {
+
+    main destroy inference $provider
 
 }

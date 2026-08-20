@@ -5,6 +5,7 @@ flux/
 .devbox/
 .DS_Store
 *.log
+tmp/
 demo/ingress.yaml
 aws-creds.conf
 eksctl-config-*.yaml
