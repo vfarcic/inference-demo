@@ -217,9 +217,9 @@ def --env "main use engine" [
 
 # Makes one batching configuration the active Qwen3-8B server
 #
-# Removes the current serving workload, recreates the GPU node to clear its host
-# cache, deploys the requested configuration, waits for the model, and warms it
-# once. Measured requests remain separate, visible manuscript commands.
+# Removes the current serving workload, deploys the requested configuration,
+# waits for the model, and warms it once. Measured requests remain separate,
+# visible manuscript commands.
 #
 # Examples:
 # > ./dot.nu use batching ollama-one aws
@@ -253,13 +253,6 @@ def --env "main use batching" [
     (
         kubectl --namespace inference delete service
             --selector app=silly-model --ignore-not-found=true
-    )
-
-    let zone = if $provider == "aws" { $AWS_ZONE } else { $ZONE }
-    (
-        main recreate gpu_nodes $provider --cluster-name $CLUSTER_NAME
-            --zone $zone --min-nodes $GPU_MIN_NODES
-            --max-nodes $GPU_MAX_NODES
     )
 
     kubectl apply --filename $"demo/($configuration).yaml"
