@@ -28,6 +28,10 @@ spec:
         - key: nvidia.com/gpu
           operator: Exists
           effect: NoSchedule
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: ollama-models
       containers:
         - name: ollama
           image: ollama/ollama:0.32.15
@@ -45,6 +49,9 @@ spec:
           ports:
             - name: http
               containerPort: 8000
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
           resources:
             limits:
               nvidia.com/gpu: 1

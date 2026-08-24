@@ -217,9 +217,9 @@ def --env "main use engine" [
 
 # Makes one batching configuration the active Qwen3-8B server
 #
-# Removes the current serving workload, deploys the requested configuration,
-# waits for the model, and warms it once. Measured requests remain separate,
-# visible manuscript commands.
+# Removes a different active engine, ensures Ollama model storage exists,
+# deploys the requested configuration, waits for the model, and warms it once.
+# Measured requests remain separate, visible manuscript commands.
 #
 # Examples:
 # > ./dot.nu use batching ollama-one aws
@@ -246,22 +246,23 @@ def --env "main use batching" [
         exit 1
     }
 
-    (
-        kubectl --namespace inference delete deployment
-            --selector app=silly-model --ignore-not-found=true --wait=true
-    )
-    (
-        kubectl --namespace inference delete service
-            --selector app=silly-model --ignore-not-found=true
-    )
-
-    kubectl apply --filename $"demo/($configuration).yaml"
-
     let deployment = if ($configuration | str starts-with "ollama") {
         "ollama"
     } else {
         "vllm"
     }
+    let previous_deployment = if $deployment == "ollama" { "vllm" } else { "ollama" }
+    (
+        kubectl --namespace inference delete $"deployment/($previous_deployment)"
+            --ignore-not-found=true --wait=true
+    )
+
+    if $deployment == "ollama" {
+        kubectl apply --filename demo/ollama-models.yaml
+    }
+
+    kubectl apply --filename $"demo/($configuration).yaml"
+
     (
         kubectl --namespace inference rollout status
             $"deployment/($deployment)" --timeout 45m
@@ -415,6 +416,28 @@ def --env "main destroy engines" [
 def --env "main destroy batching" [
     provider: string   # Cloud provider. `google` or `aws`
 ] {
+
+    if not ("KUBECONFIG" in $env) {
+        $env.KUBECONFIG = $"($env.PWD)/kubeconfig-($CLUSTER_NAME).yaml"
+    }
+
+    # Release the claim before deleting it so the CSI controller can remove the
+    # cloud disk while the cluster is still available.
+    do --ignore-errors {
+        (
+            kubectl --namespace inference delete deployment ollama
+                --ignore-not-found=true --wait=true
+        )
+    }
+
+    # Delete the claim while the CSI controller is still available so its cloud
+    # disk is not orphaned when the cluster disappears.
+    do --ignore-errors {
+        (
+            kubectl --namespace inference delete pvc ollama-models
+                --ignore-not-found=true --wait=true --timeout 10m
+        )
+    }
 
     main destroy inference $provider
 
