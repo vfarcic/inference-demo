@@ -8,14 +8,14 @@
   {
     "id": "aws-long",
     "send_after_ms": 0,
-    "prompt": "Explain AWS in approximately 220 words. /no_think",
-    "max_tokens": 384
+    "prompt": "Explain AWS in approximately 300 words. /no_think",
+    "max_tokens": 512
   },
   {
-    "id": "crossplane-medium",
+    "id": "crossplane-short",
     "send_after_ms": 0,
-    "prompt": "Explain Crossplane in approximately 120 words. /no_think",
-    "max_tokens": 256
+    "prompt": "Define Crossplane in two sentences. /no_think",
+    "max_tokens": 96
   },
   {
     "id": "gitops-long",
@@ -31,19 +31,19 @@
   },
   {
     "id": "helm-short",
-    "send_after_ms": 1200,
+    "send_after_ms": 1000,
     "prompt": "Define Helm in one sentence. /no_think",
     "max_tokens": 64
   },
   {
     "id": "flux-short",
-    "send_after_ms": 1400,
+    "send_after_ms": 1000,
     "prompt": "Define Flux in two sentences. /no_think",
     "max_tokens": 96
   },
   {
     "id": "terraform-short",
-    "send_after_ms": 1600,
+    "send_after_ms": 1000,
     "prompt": "Define Terraform in two sentences. /no_think",
     "max_tokens": 96
   }
