@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: inference
+  labels:
+    app: silly-model
+    engine: ollama
+    batching: one
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 2700
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: silly-model
+      engine: ollama
+  template:
+    metadata:
+      labels:
+        app: silly-model
+        engine: ollama
+        batching: one
+    spec:
+      enableServiceLinks: false
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: ollama
+          image: ollama/ollama:0.32.15
+          env:
+            - name: OLLAMA_HOST
+              value: 0.0.0.0:8000
+            - name: OLLAMA_CONTEXT_LENGTH
+              value: "4096"
+            - name: OLLAMA_NUM_PARALLEL
+              value: "1"
+            - name: OLLAMA_KV_CACHE_TYPE
+              value: f16
+            - name: OLLAMA_NO_CLOUD
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 120
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: silly-model
+  namespace: inference
+  labels:
+    app: silly-model
+spec:
+  selector:
+    app: silly-model
+  ports:
+    - port: 8000
+      targetPort: http

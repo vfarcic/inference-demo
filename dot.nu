@@ -4,6 +4,7 @@ source scripts/kubernetes.nu
 source scripts/common.nu
 source scripts/flux.nu
 source scripts/ingress.nu
+source scripts/openai-load.nu
 
 # Each episode of the series gets its own `setup` and `destroy` subcommand.
 # Once an episode is published its command is frozen, since the video shows it.
@@ -110,6 +111,29 @@ def --env "main setup engines" [
 
 }
 
+# Creates the cluster used by the inference batching episode
+#
+# Builds on the common inference infrastructure while giving the batching
+# episode its own command, which can be frozen independently once published.
+#
+# Examples:
+# > ./dot.nu setup batching google
+# > ./dot.nu setup batching aws
+def --env "main setup batching" [
+    provider: string          # Cloud provider. `google` or `aws`
+    --billing-account = ""    # Billing account to link. Auto-detected when empty
+    --auth = true             # Whether to authenticate. Set to false if already logged in
+] {
+
+    (
+        main setup inference $provider --billing-account $billing_account
+            --auth $auth
+    )
+
+    kubectl apply --filename demo/ingress.yaml
+
+}
+
 # Makes one inference engine the active server for Qwen3-8B
 #
 # Removes the current serving workload, recreates the GPU node to clear its host
@@ -188,6 +212,93 @@ def --env "main use engine" [
     }
 
     print $"(ansi green_bold)($engine) is ready and warm.(ansi reset)"
+
+}
+
+# Makes one batching configuration the active Qwen3-8B server
+#
+# Removes the current serving workload, recreates the GPU node to clear its host
+# cache, deploys the requested configuration, waits for the model, and warms it
+# once. Measured requests remain separate, visible manuscript commands.
+#
+# Examples:
+# > ./dot.nu use batching ollama-one aws
+# > ./dot.nu use batching ollama-four google
+# > ./dot.nu use batching vllm-four aws
+def --env "main use batching" [
+    configuration: string     # `ollama-one`, `ollama-four`, or `vllm-four`
+    provider: string          # Cloud provider. `google` or `aws`
+] {
+
+    if not ($provider in ["google" "aws"]) {
+        print $"(ansi red_bold)($provider)(ansi reset) is not supported. Use `google` or `aws`."
+        exit 1
+    }
+
+    let configurations = ["ollama-one" "ollama-four" "vllm-four"]
+    if not ($configuration in $configurations) {
+        print $"(ansi red_bold)($configuration)(ansi reset) is not supported. Use `ollama-one`, `ollama-four`, or `vllm-four`."
+        exit 1
+    }
+
+    if not ("INGRESS_HOST" in $env) {
+        print $"(ansi red_bold)INGRESS_HOST is not set(ansi reset). Execute `source .env` first."
+        exit 1
+    }
+
+    (
+        kubectl --namespace inference delete deployment
+            --selector app=silly-model --ignore-not-found=true --wait=true
+    )
+    (
+        kubectl --namespace inference delete service
+            --selector app=silly-model --ignore-not-found=true
+    )
+
+    let zone = if $provider == "aws" { $AWS_ZONE } else { $ZONE }
+    (
+        main recreate gpu_nodes $provider --cluster-name $CLUSTER_NAME
+            --zone $zone --min-nodes $GPU_MIN_NODES
+            --max-nodes $GPU_MAX_NODES
+    )
+
+    kubectl apply --filename $"demo/($configuration).yaml"
+
+    let deployment = if ($configuration | str starts-with "ollama") {
+        "ollama"
+    } else {
+        "vllm"
+    }
+    (
+        kubectl --namespace inference rollout status
+            $"deployment/($deployment)" --timeout 45m
+    )
+
+    if $deployment == "ollama" {
+        (
+            kubectl --namespace inference exec deployment/ollama
+                -- ollama pull qwen3:8b-fp16
+        )
+        (
+            kubectl --namespace inference exec deployment/ollama
+                -- ollama cp qwen3:8b-fp16 qwen3-8b
+        )
+    }
+
+    let response = (
+        curl --fail --silent --show-error
+            --header "Content-Type: application/json"
+            --data-binary "@demo/batching-request.json"
+            $"http://silly-model.($env.INGRESS_HOST)/v1/chat/completions"
+        | from json
+    )
+
+    if (($response | get choices? | default [] | length) == 0) {
+        print $"(ansi red_bold)The warm-up request did not return a completion.(ansi reset)"
+        exit 1
+    }
+
+    print $"(ansi green_bold)($configuration) is ready and warm.(ansi reset)"
 
 }
 
@@ -296,6 +407,19 @@ def --env "main destroy inference" [
 # > ./dot.nu destroy engines google
 # > ./dot.nu destroy engines aws
 def --env "main destroy engines" [
+    provider: string   # Cloud provider. `google` or `aws`
+] {
+
+    main destroy inference $provider
+
+}
+
+# Destroys the cluster created for the inference batching episode
+#
+# Examples:
+# > ./dot.nu destroy batching google
+# > ./dot.nu destroy batching aws
+def --env "main destroy batching" [
     provider: string   # Cloud provider. `google` or `aws`
 ] {
 

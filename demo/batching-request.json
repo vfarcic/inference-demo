@@ -1,0 +1,13 @@
+{
+  "model": "qwen3-8b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Explain Kubernetes in exactly three sentences. /no_think"
+    }
+  ],
+  "temperature": 0,
+  "seed": 42,
+  "max_tokens": 128,
+  "stream": false
+}
