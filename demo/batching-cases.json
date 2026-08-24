@@ -1,49 +1,49 @@
 [
   {
     "id": "kubernetes-long",
-    "arrival_ms": 0,
+    "send_after_ms": 0,
     "prompt": "Explain Kubernetes in approximately 300 words. /no_think",
     "max_tokens": 512
   },
   {
     "id": "aws-long",
-    "arrival_ms": 0,
+    "send_after_ms": 0,
     "prompt": "Explain AWS in approximately 220 words. /no_think",
     "max_tokens": 384
   },
   {
     "id": "crossplane-medium",
-    "arrival_ms": 0,
+    "send_after_ms": 0,
     "prompt": "Explain Crossplane in approximately 120 words. /no_think",
     "max_tokens": 256
   },
   {
     "id": "gitops-long",
-    "arrival_ms": 0,
+    "send_after_ms": 0,
     "prompt": "Explain GitOps in approximately 300 words. /no_think",
     "max_tokens": 512
   },
   {
     "id": "containers-short",
-    "arrival_ms": 1000,
+    "send_after_ms": 1000,
     "prompt": "Define containers in one sentence. /no_think",
     "max_tokens": 64
   },
   {
     "id": "helm-short",
-    "arrival_ms": 1200,
+    "send_after_ms": 1200,
     "prompt": "Define Helm in one sentence. /no_think",
     "max_tokens": 64
   },
   {
     "id": "flux-short",
-    "arrival_ms": 1400,
+    "send_after_ms": 1400,
     "prompt": "Define Flux in two sentences. /no_think",
     "max_tokens": 96
   },
   {
     "id": "terraform-short",
-    "arrival_ms": 1600,
+    "send_after_ms": 1600,
     "prompt": "Define Terraform in two sentences. /no_think",
     "max_tokens": 96
   }

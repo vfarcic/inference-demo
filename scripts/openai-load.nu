@@ -34,8 +34,8 @@ def openai_load_stats [values] {
 
 # Runs a deterministic, scheduled workload against an OpenAI-compatible chat API
 #
-# The cases file is a JSON list. Each item must contain `id`, `arrival_ms`,
-# `prompt`, and `max_tokens`. Requests are started after their arrival delay and
+# The cases file is a JSON list. Each item must contain `id`, `send_after_ms`,
+# `prompt`, and `max_tokens`. Requests are started after their configured delay and
 # use streaming responses so curl's time-to-first-byte can approximate TTFT.
 #
 # Example:
@@ -79,9 +79,9 @@ def "main run openai_load" [
         | enumerate
         | par-each --threads $worker_count --keep-order { |entry|
             let request_case = $entry.item
-            let arrival_ms = ($request_case | get arrival_ms? | default 0)
+            let send_after_ms = ($request_case | get send_after_ms? | default 0)
 
-            sleep ($arrival_ms * 1ms)
+            sleep ($send_after_ms * 1ms)
 
             let started = (date now)
             let start_offset_ms = (($started - $suite_started) / 1ms)
@@ -132,7 +132,7 @@ def "main run openai_load" [
             {
                 request_id: $entry.index
                 case_id: ($request_case | get id)
-                arrival_ms: $arrival_ms
+                send_after_ms: $send_after_ms
                 start_ms: ($start_offset_ms | math round --precision 1)
                 first_byte_ms: (($start_offset_ms + $ttft_ms) | math round --precision 1)
                 finish_ms: (($start_offset_ms + $total_ms) | math round --precision 1)
@@ -184,7 +184,7 @@ def "main run openai_load" [
         $report | to json --indent 2 | save --force $output
     }
 
-    print ($results | select case_id arrival_ms first_byte_ms finish_ms)
+    print ($results | select case_id send_after_ms first_byte_ms finish_ms)
     print ($summary | reject ttft total_latency)
     print "TTFT (milliseconds)"
     print $summary.ttft
