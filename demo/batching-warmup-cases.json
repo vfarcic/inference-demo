@@ -1,0 +1,26 @@
+[
+  {
+    "id": "warmup-alpha",
+    "send_after_ms": 0,
+    "prompt": "Reply with only the word alpha. /no_think",
+    "max_tokens": 8
+  },
+  {
+    "id": "warmup-bravo",
+    "send_after_ms": 0,
+    "prompt": "Reply with only the word bravo. /no_think",
+    "max_tokens": 8
+  },
+  {
+    "id": "warmup-charlie",
+    "send_after_ms": 0,
+    "prompt": "Reply with only the word charlie. /no_think",
+    "max_tokens": 8
+  },
+  {
+    "id": "warmup-delta",
+    "send_after_ms": 0,
+    "prompt": "Reply with only the word delta. /no_think",
+    "max_tokens": 8
+  }
+]

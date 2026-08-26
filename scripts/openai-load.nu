@@ -32,11 +32,31 @@ def openai_load_stats [values] {
 
 }
 
+def openai_load_has_token [line: string] {
+
+    if not ($line | str starts-with "data: ") or ($line == "data: [DONE]") {
+        false
+    } else {
+        try {
+            let event = ($line | str replace "data: " "" | from json)
+            let delta = $event.choices.0.delta
+            let content = ($delta.content? | default "")
+            let reasoning = ($delta.reasoning? | default "")
+            let reasoning_content = ($delta.reasoning_content? | default "")
+
+            ((not ($content | is-empty)) or (not ($reasoning | is-empty)) or (not ($reasoning_content | is-empty)))
+        } catch {
+            false
+        }
+    }
+
+}
+
 # Runs a deterministic, scheduled workload against an OpenAI-compatible chat API
 #
 # The cases file is a JSON list. Each item must contain `id`, `send_after_ms`,
 # `prompt`, and `max_tokens`. Requests are started after their configured delay and
-# use streaming responses so curl's time-to-first-byte can approximate TTFT.
+# use streaming responses so the first non-empty completion token can be timed.
 #
 # Example:
 # > main run openai_load http://model.example/v1/chat/completions \
@@ -97,52 +117,102 @@ def "main run openai_load" [
                 stream: true
             } | to json)
 
-            let response = (
+            let metrics_marker = "__OPENAI_LOAD_METRICS__"
+            let write_out = ([
+                "\n"
+                $metrics_marker
+                "\t%{http_code}\t%{time_total}\t%{exitcode}\t%{errormsg}"
+            ] | str join)
+            let streamed = (
                 do --ignore-errors {
                     (
                         ^curl --fail-with-body --silent --show-error --no-buffer
-                            --output "/dev/null"
-                            --write-out "%{http_code}\t%{time_starttransfer}\t%{time_total}"
+                            -w $write_out
                             --header "Content-Type: application/json"
                             --data-binary $body
                             $url
                     )
-                } | complete
+                }
+                | lines
+                | each { |line|
+                    {
+                        line: $line
+                        received_ms: (((date now) - $started) / 1ms)
+                    }
+                }
+                | collect
             )
 
-            let fields = ($response.stdout | str trim | split row "\t")
-            let has_metrics = (($fields | length) >= 3)
+            let metrics_rows = (
+                $streamed
+                | where { |row| $row.line | str starts-with $metrics_marker }
+            )
+            let has_metrics = not ($metrics_rows | is-empty)
+            let fields = if $has_metrics {
+                $metrics_rows | last | get line | split row "\t"
+            } else {
+                []
+            }
             let http_status = if $has_metrics {
-                $fields.0 | into int
+                $fields.1 | into int
             } else {
                 0
-            }
-            let ttft_ms = if $has_metrics {
-                ($fields.1 | into float) * 1000
-            } else {
-                0.0
             }
             let total_ms = if $has_metrics {
                 ($fields.2 | into float) * 1000
             } else {
                 0.0
             }
-            let success = ($response.exit_code == 0) and ($http_status == 200)
+            let curl_exit_code = if $has_metrics {
+                $fields.3 | into int
+            } else {
+                1
+            }
+            let token_rows = ($streamed | where { |row| openai_load_has_token $row.line })
+            let ttft_ms = if ($token_rows | is-empty) {
+                null
+            } else {
+                $token_rows | first | get received_ms
+            }
+            let stream_completed = ($streamed | any { |row| $row.line == "data: [DONE]" })
+            let success = (
+                ($curl_exit_code == 0)
+                and ($http_status == 200)
+                and (not ($token_rows | is-empty))
+                and $stream_completed
+            )
+            let error = if $success {
+                ""
+            } else if $has_metrics and (($fields | length) >= 5) and (not ($fields.4 | is-empty)) {
+                $fields | skip 4 | str join "\t"
+            } else if not $stream_completed {
+                "Streaming response ended before data: [DONE]."
+            } else {
+                "No non-empty streamed completion token received."
+            }
 
             {
                 request_id: $entry.index
                 case_id: ($request_case | get id)
                 send_after_ms: $send_after_ms
                 start_ms: ($start_offset_ms | math round --precision 1)
-                first_byte_ms: (($start_offset_ms + $ttft_ms) | math round --precision 1)
+                first_token_ms: (if $ttft_ms == null {
+                    null
+                } else {
+                    ($start_offset_ms + $ttft_ms) | math round --precision 1
+                })
                 finish_ms: (($start_offset_ms + $total_ms) | math round --precision 1)
-                ttft_ms: ($ttft_ms | math round --precision 1)
+                ttft_ms: (if $ttft_ms == null {
+                    null
+                } else {
+                    $ttft_ms | math round --precision 1
+                })
                 total_ms: ($total_ms | math round --precision 1)
                 max_tokens: ($request_case | get max_tokens)
                 http_status: $http_status
-                curl_exit_code: $response.exit_code
+                curl_exit_code: $curl_exit_code
                 success: $success
-                error: (if $success { "" } else { $response.stderr | str trim })
+                error: $error
             }
         }
     )
@@ -184,7 +254,7 @@ def "main run openai_load" [
         $report | to json --indent 2 | save --force $output
     }
 
-    print ($results | select case_id send_after_ms first_byte_ms finish_ms)
+    print ($results | select case_id send_after_ms first_token_ms finish_ms)
     print ($summary | reject ttft total_latency)
     print "TTFT (milliseconds)"
     print $summary.ttft

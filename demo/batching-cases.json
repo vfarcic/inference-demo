@@ -46,5 +46,77 @@
     "send_after_ms": 1000,
     "prompt": "Define Terraform in two sentences. /no_think",
     "max_tokens": 96
+  },
+  {
+    "id": "platform-engineering-medium",
+    "send_after_ms": 3000,
+    "prompt": "Explain platform engineering in approximately 120 words. /no_think",
+    "max_tokens": 256
+  },
+  {
+    "id": "observability-medium",
+    "send_after_ms": 3000,
+    "prompt": "Explain observability in approximately 120 words. /no_think",
+    "max_tokens": 256
+  },
+  {
+    "id": "cicd-short",
+    "send_after_ms": 3000,
+    "prompt": "Define continuous delivery in two sentences. /no_think",
+    "max_tokens": 96
+  },
+  {
+    "id": "docker-short",
+    "send_after_ms": 5000,
+    "prompt": "Define Docker in one sentence. /no_think",
+    "max_tokens": 64
+  },
+  {
+    "id": "linux-medium",
+    "send_after_ms": 5000,
+    "prompt": "Explain the Linux kernel in approximately 120 words. /no_think",
+    "max_tokens": 256
+  },
+  {
+    "id": "prometheus-short",
+    "send_after_ms": 5000,
+    "prompt": "Define Prometheus in two sentences. /no_think",
+    "max_tokens": 96
+  },
+  {
+    "id": "argocd-medium",
+    "send_after_ms": 5000,
+    "prompt": "Explain Argo CD in approximately 120 words. /no_think",
+    "max_tokens": 256
+  },
+  {
+    "id": "networking-long",
+    "send_after_ms": 8000,
+    "prompt": "Explain computer networking in approximately 220 words. /no_think",
+    "max_tokens": 384
+  },
+  {
+    "id": "databases-medium",
+    "send_after_ms": 8000,
+    "prompt": "Explain relational databases in approximately 120 words. /no_think",
+    "max_tokens": 256
+  },
+  {
+    "id": "security-short",
+    "send_after_ms": 8000,
+    "prompt": "Define zero-trust security in two sentences. /no_think",
+    "max_tokens": 96
+  },
+  {
+    "id": "serverless-short",
+    "send_after_ms": 12000,
+    "prompt": "Define serverless computing in two sentences. /no_think",
+    "max_tokens": 96
+  },
+  {
+    "id": "kafka-long",
+    "send_after_ms": 12000,
+    "prompt": "Explain Apache Kafka in approximately 220 words. /no_think",
+    "max_tokens": 384
   }
 ]
