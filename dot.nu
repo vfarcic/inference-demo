@@ -5,6 +5,7 @@ source scripts/common.nu
 source scripts/flux.nu
 source scripts/ingress.nu
 source scripts/openai-load.nu
+source scripts/keda.nu
 
 # Each episode of the series gets its own `setup` and `destroy` subcommand.
 # Once an episode is published its command is frozen, since the video shows it.
@@ -24,6 +25,11 @@ const MAX_NODES = 3
 # autoscaler timing. Scale to zero is episode 5's subject.
 const GPU_MIN_NODES = 1
 const GPU_MAX_NODES = 1
+# The autoscaling episode is the one that lets the pool empty out. Zero is the
+# point of the episode, and two is what a second replica needs, since one L4
+# holds exactly one copy of the model.
+const AUTOSCALING_GPU_MIN_NODES = 0
+const AUTOSCALING_GPU_MAX_NODES = 2
 
 def main [] {}
 
@@ -40,12 +46,20 @@ def --env "main setup inference" [
     provider: string          # Cloud provider. `google` or `aws`
     --billing-account = ""    # Billing account to link. Auto-detected when empty
     --auth = true             # Whether to authenticate. Set to false if already logged in
+    --gpu-min-nodes = -1      # Smallest GPU pool size. Defaults to the series value
+    --gpu-max-nodes = -1      # Largest GPU pool size. Defaults to the series value
 ] {
 
     if not ($provider in ["google" "aws"]) {
         print $"(ansi red_bold)($provider)(ansi reset) is not supported yet. Use `google` or `aws`."
         exit 1
     }
+
+    # Episodes one to three run a fixed single GPU node. The autoscaling episode
+    # passes its own bounds. Defaulting to the constants keeps the published
+    # commands behaving exactly as their videos show.
+    let min_gpu = if $gpu_min_nodes < 0 { $GPU_MIN_NODES } else { $gpu_min_nodes }
+    let max_gpu = if $gpu_max_nodes < 0 { $GPU_MAX_NODES } else { $gpu_max_nodes }
 
     rm --force .env
 
@@ -67,7 +81,7 @@ def --env "main setup inference" [
 
     (
         main create gpu_nodes $provider --cluster-name $CLUSTER_NAME --zone $zone
-            --min-nodes $GPU_MIN_NODES --max-nodes $GPU_MAX_NODES
+            --min-nodes $min_gpu --max-nodes $max_gpu
     )
 
     let ingress = (main apply ingress traefik --provider $provider)
@@ -131,6 +145,82 @@ def --env "main setup batching" [
     )
 
     kubectl apply --filename demo/ingress.yaml
+
+}
+
+# Creates the cluster used by the inference autoscaling episode
+#
+# Builds on the common inference infrastructure, but lets the GPU pool empty
+# out. The pool starts with one node and may drop to zero or grow to two, which
+# is what makes both scale to zero and a second replica observable.
+#
+# Also installs KEDA and its HTTP add-on. KEDA is a controller, in the same
+# category as Flux: setup puts it there, and the resources that steer it stay
+# visible in the episode. On AWS the cluster autoscaler comes with it, because
+# nothing on EKS resizes a node group otherwise.
+#
+# Examples:
+# > ./dot.nu setup autoscaling google
+# > ./dot.nu setup autoscaling aws
+def --env "main setup autoscaling" [
+    provider: string          # Cloud provider. `google` or `aws`
+    --billing-account = ""    # Billing account to link. Auto-detected when empty
+    --auth = true             # Whether to authenticate. Set to false if already logged in
+] {
+
+    (
+        main setup inference $provider --billing-account $billing_account
+            --auth $auth
+            --gpu-min-nodes $AUTOSCALING_GPU_MIN_NODES
+            --gpu-max-nodes $AUTOSCALING_GPU_MAX_NODES
+    )
+
+    main apply keda
+
+    if $provider == "aws" {
+        main apply cluster_autoscaler --cluster-name $CLUSTER_NAME
+    }
+
+    # `main setup inference` writes INGRESS_HOST to `.env` but cannot export it
+    # into this process, so read it back rather than asking for a second call.
+    let ingress_host = (
+        open .env
+            | lines
+            | where ($it | str starts-with "export INGRESS_HOST=")
+            | first
+            | split row "="
+            | last
+            | str trim
+    )
+
+    main generate autoscaling --host $ingress_host
+
+    kubectl apply --filename demo/ingress.yaml
+
+    # The always-on server everything in the episode is measured against. One
+    # replica, weights pulled from Hugging Face on every start, no autoscaler
+    # involved yet.
+    kubectl apply --filename demo/autoscaling-vllm.yaml
+
+    (
+        kubectl --namespace inference rollout status deployment/vllm
+            --timeout 45m
+    )
+
+    let response = (
+        curl --fail --silent --show-error
+            --header "Content-Type: application/json"
+            --data-binary "@demo/batching-request.json"
+            $"http://silly-model.($ingress_host)/v1/chat/completions"
+        | from json
+    )
+
+    if (($response | get choices? | default [] | length) == 0) {
+        print $"(ansi red_bold)The warm-up request did not return a completion.(ansi reset)"
+        exit 1
+    }
+
+    print $"(ansi green_bold)The always-on server is ready and warm.(ansi reset)"
 
 }
 
@@ -355,6 +445,138 @@ def "main generate ingress" [
 
 }
 
+# Writes the two manifests that put the interceptor in front of the model
+#
+# Both need the load balancer address, which only exists once the cluster does,
+# so they are generated rather than committed, exactly like demo/ingress.yaml.
+#
+# The Ingress lives in the `keda` namespace because an Ingress can only name a
+# Service in its own namespace, and the interceptor proxy runs there. The
+# InterceptorRoute lives next to the model it scales.
+#
+# Examples:
+# > ./dot.nu generate autoscaling
+def "main generate autoscaling" [
+    --name = "silly-model",   # Name of the Service and host prefix
+    --port = 8000,            # Port the model Service listens on
+    --class = "traefik",      # Ingress class
+    --concurrency = 16,       # In-flight requests per replica the plain route targets
+    --request-rate = 10,      # Requests per second per replica the placeholder route targets
+    --host = ""               # Ingress host. Falls back to $INGRESS_HOST
+] {
+
+    mut ingress_host = $host
+
+    if $ingress_host == "" {
+        if not ("INGRESS_HOST" in $env) {
+            print $"(ansi red_bold)INGRESS_HOST is not set(ansi reset). Pass --host, or execute `source .env` first."
+            exit 1
+        }
+        $ingress_host = $env.INGRESS_HOST
+    }
+
+    {
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata: {
+            name: $name
+            namespace: keda
+        }
+        spec: {
+            ingressClassName: $class
+            rules: [{
+                host: $"($name).($ingress_host)"
+                http: {
+                    paths: [{
+                        path: "/"
+                        pathType: Prefix
+                        backend: {
+                            service: {
+                                name: "keda-add-ons-http-interceptor-proxy"
+                                port: { number: 8080 }
+                            }
+                        }
+                    }]
+                }
+            }]
+        }
+    } | to yaml | save demo/autoscaling-ingress.yaml --force
+
+    {
+        apiVersion: http.keda.sh/v1beta1
+        kind: InterceptorRoute
+        metadata: {
+            name: vllm
+            namespace: inference
+        }
+        spec: {
+            target: {
+                service: $name
+                port: $port
+            }
+            rules: [{
+                hosts: [$"($name).($ingress_host)"]
+            }]
+            scalingMetric: {
+                concurrency: {
+                    targetValue: $concurrency
+                }
+            }
+        }
+    } | to yaml | save demo/autoscaling-route.yaml --force
+
+    # Same route with a placeholder response. Without one the interceptor holds
+    # the connection open for as long as the cold start takes; with one it
+    # answers immediately and lets the caller decide whether to wait.
+    #
+    # The scaling metric has to change with it, and this is not optional.
+    # `concurrency` counts requests that are in flight, and a placeholder is
+    # answered in under a second, so concurrency never leaves zero, KEDA never
+    # activates, and every caller gets a 503 forever while the model stays
+    # asleep. Verified on 2026-09-03: ten requests, ten 503s, no Pod. Counting
+    # requests instead of in-flight time is what makes the wake-up survive
+    # answering immediately.
+    {
+        apiVersion: http.keda.sh/v1beta1
+        kind: InterceptorRoute
+        metadata: {
+            name: vllm
+            namespace: inference
+        }
+        spec: {
+            target: {
+                service: $name
+                port: $port
+            }
+            rules: [{
+                hosts: [$"($name).($ingress_host)"]
+            }]
+            scalingMetric: {
+                requestRate: {
+                    targetValue: $request_rate
+                    window: "1m"
+                    granularity: "1s"
+                }
+            }
+            coldStart: {
+                placeholder: {
+                    response: {
+                        statusCode: 503
+                        headers: {
+                            "Retry-After": "60"
+                            "Content-Type": "application/json"
+                        }
+                        body: '{"error":{"message":"The model is starting up. Retry in about a minute.","type":"model_cold_start"}}'
+                    }
+                }
+            }
+        }
+    } | to yaml | save demo/autoscaling-route-placeholder.yaml --force
+
+    print $"Wrote (ansi yellow_bold)demo/autoscaling-ingress.yaml(ansi reset), (ansi yellow_bold)demo/autoscaling-route.yaml(ansi reset) and (ansi yellow_bold)demo/autoscaling-route-placeholder.yaml(ansi reset) for host ($name).($ingress_host)"
+
+}
+
 # Destroys the cluster created for the inference engine episode
 #
 # Deletes the cluster and everything setup created around it.
@@ -435,6 +657,48 @@ def --env "main destroy batching" [
     do --ignore-errors {
         (
             kubectl --namespace inference delete pvc ollama-models
+                --ignore-not-found=true --wait=true --timeout 10m
+        )
+    }
+
+    main destroy inference $provider
+
+}
+
+# Destroys the cluster created for the inference autoscaling episode
+#
+# Examples:
+# > ./dot.nu destroy autoscaling google
+# > ./dot.nu destroy autoscaling aws
+def --env "main destroy autoscaling" [
+    provider: string   # Cloud provider. `google` or `aws`
+] {
+
+    if not ("KUBECONFIG" in $env) {
+        $env.KUBECONFIG = $"($env.PWD)/kubeconfig-($CLUSTER_NAME).yaml"
+    }
+
+    # The ScaledObject would otherwise keep putting the Deployment back while
+    # the disk is being released.
+    do --ignore-errors {
+        (
+            kubectl --namespace inference delete scaledobject vllm
+                --ignore-not-found=true
+        )
+    }
+
+    do --ignore-errors {
+        (
+            kubectl --namespace inference delete deployment vllm
+                --ignore-not-found=true --wait=true
+        )
+    }
+
+    # Delete the claim while the CSI controller is still available so its cloud
+    # disk is not orphaned when the cluster disappears.
+    do --ignore-errors {
+        (
+            kubectl --namespace inference delete pvc model-weights
                 --ignore-not-found=true --wait=true --timeout 10m
         )
     }

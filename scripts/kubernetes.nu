@@ -171,6 +171,11 @@ def --env "main create gpu_nodes" [
 
         # eksctl installs the NVIDIA device plugin itself once it sees a GPU
         # instance type, so there is no driver argument to pass here.
+        # The cluster autoscaler reads the Auto Scaling group's tags to work out
+        # what a node from an empty group would look like. Without the
+        # node-template tags it cannot know the group offers a GPU or carries a
+        # taint, so a pending GPU Pod never triggers a scale up from zero. GKE
+        # gets this from the node pool definition and needs no equivalent.
         mut node_group = {
             name: $name
             instanceType: $size
@@ -178,6 +183,13 @@ def --env "main create gpu_nodes" [
             minSize: $min_nodes
             maxSize: $max_nodes
             desiredCapacity: $num_nodes
+            propagateASGTags: true
+            tags: {
+                "k8s.io/cluster-autoscaler/enabled": "true"
+                $"k8s.io/cluster-autoscaler/($cluster_name)": "owned"
+                "k8s.io/cluster-autoscaler/node-template/resources/nvidia.com/gpu": "1"
+                "k8s.io/cluster-autoscaler/node-template/taint/nvidia.com/gpu": "present:NoSchedule"
+            }
             iam: {
                 withAddonPolicies: {
                     autoScaler: true

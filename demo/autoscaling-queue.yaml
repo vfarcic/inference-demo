@@ -1,0 +1,20 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vllm
+  namespace: inference
+spec:
+  scaleTargetRef:
+    name: vllm
+  minReplicaCount: 1
+  maxReplicaCount: 2
+  pollingInterval: 5
+  cooldownPeriod: 120
+  triggers:
+    - type: metrics-api
+      metadata:
+        url: http://silly-model.inference:8000/metrics
+        format: prometheus
+        valueLocation: vllm:num_requests_waiting
+        targetValue: "4"
+        activationTargetValue: "0"

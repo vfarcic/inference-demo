@@ -1,0 +1,17 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vllm
+  namespace: inference
+spec:
+  scaleTargetRef:
+    name: vllm
+  minReplicaCount: 0
+  maxReplicaCount: 1
+  pollingInterval: 5
+  cooldownPeriod: 120
+  triggers:
+    - type: external-push
+      metadata:
+        scalerAddress: keda-add-ons-http-external-scaler.keda:9090
+        interceptorRoute: vllm

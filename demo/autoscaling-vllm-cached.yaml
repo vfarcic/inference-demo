@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-weights
+  namespace: inference
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: inference
+  labels:
+    app: silly-model
+    engine: vllm
+    weights: cached
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 2700
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: silly-model
+      engine: vllm
+  template:
+    metadata:
+      labels:
+        app: silly-model
+        engine: vllm
+        weights: cached
+    spec:
+      enableServiceLinks: false
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      volumes:
+        - name: weights
+          persistentVolumeClaim:
+            claimName: model-weights
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.27.1
+          args:
+            - --model
+            - Qwen/Qwen3-8B
+            - --served-model-name
+            - qwen3-8b
+            - --dtype
+            - float16
+            - --max-model-len
+            - "4096"
+            - --gpu-memory-utilization
+            - "0.92"
+            - --max-num-seqs
+            - "16"
+          env:
+            - name: HF_HOME
+              value: /weights
+          volumeMounts:
+            - name: weights
+              mountPath: /weights
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 360
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: silly-model
+  namespace: inference
+  labels:
+    app: silly-model
+spec:
+  selector:
+    app: silly-model
+  ports:
+    - port: 8000
+      targetPort: http

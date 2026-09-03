@@ -7,6 +7,9 @@ flux/
 *.log
 tmp/
 demo/ingress.yaml
+demo/autoscaling-ingress.yaml
+demo/autoscaling-route.yaml
+demo/autoscaling-route-placeholder.yaml
 aws-creds.conf
 eksctl-config-*.yaml
 eksctl-nodegroup-*.yaml
