@@ -573,6 +573,45 @@ def "main generate autoscaling" [
         }
     } | to yaml | save demo/autoscaling-route-placeholder.yaml --force
 
+    # The same placeholder bolted onto the ORIGINAL concurrency metric, which is
+    # what you write if you add `coldStart` and change nothing else. It does not
+    # work, and it fails silently: the episode applies this one first so the
+    # failure is seen rather than described. Keep it broken on purpose.
+    {
+        apiVersion: http.keda.sh/v1beta1
+        kind: InterceptorRoute
+        metadata: {
+            name: vllm
+            namespace: inference
+        }
+        spec: {
+            target: {
+                service: $name
+                port: $port
+            }
+            rules: [{
+                hosts: [$"($name).($ingress_host)"]
+            }]
+            scalingMetric: {
+                concurrency: {
+                    targetValue: $concurrency
+                }
+            }
+            coldStart: {
+                placeholder: {
+                    response: {
+                        statusCode: 503
+                        headers: {
+                            "Retry-After": "60"
+                            "Content-Type": "application/json"
+                        }
+                        body: '{"error":{"message":"The model is starting up. Retry in about a minute.","type":"model_cold_start"}}'
+                    }
+                }
+            }
+        }
+    } | to yaml | save demo/autoscaling-route-placeholder-naive.yaml --force
+
     print $"Wrote (ansi yellow_bold)demo/autoscaling-ingress.yaml(ansi reset), (ansi yellow_bold)demo/autoscaling-route.yaml(ansi reset) and (ansi yellow_bold)demo/autoscaling-route-placeholder.yaml(ansi reset) for host ($name).($ingress_host)"
 
 }

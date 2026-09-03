@@ -13,3 +13,4 @@ demo/autoscaling-route-placeholder.yaml
 aws-creds.conf
 eksctl-config-*.yaml
 eksctl-nodegroup-*.yaml
+demo/autoscaling-route-placeholder-naive.yaml
