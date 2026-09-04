@@ -632,14 +632,28 @@ def "main generate autoscaling" [
 # > ./dot.nu generate load_cases
 # > ./dot.nu generate load_cases --rate 2 --duration-seconds 840
 def "main generate load_cases" [
-    --rate = 2                 # Requests per second
-    --duration-seconds = 840   # How long requests keep arriving
+    --rate = 2                 # Requests per second. Must sit between what one
+                               # replica serves and what two serve, or the
+                               # hand-over is invisible: below one and no queue
+                               # ever builds, above two and the queue never
+                               # drains. Measured on an L4 with qwen3-8b, and
+                               # the catch is that capacity is not a constant.
+                               # Unsaturated, one replica sustains about 1.55/s.
+                               # Saturated -- a full batch of 16 competing for
+                               # KV cache -- it drops to about 1.2/s. So 1.5/s
+                               # sits in a stable equilibrium where nothing ever
+                               # queues, and the rate has to clear 1.55 to build
+                               # a backlog at all.
+    --duration-seconds = 1200  # How long requests keep arriving. Has to outlast
+                               # a cold start with room to spare -- roughly ten
+                               # minutes before the second replica exists, then
+                               # long enough after it for the backlog to drain.
     --max-tokens = 512         # Output limit per request
     --output = "demo/autoscaling-sustained-cases.json"
 ] {
 
     let prompts = (open demo/batching-cases.json | get prompt)
-    let total = ($rate * $duration_seconds)
+    let total = (($rate * $duration_seconds) | into int)
     let interval = (1000 / $rate)
 
     let cases = (
