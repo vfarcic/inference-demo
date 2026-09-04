@@ -616,6 +616,49 @@ def "main generate autoscaling" [
 
 }
 
+# Writes a load schedule that outlives a cold start
+#
+# The burst fixture is over in under a minute, which is far shorter than the
+# time it takes a second replica to exist. Nothing about the hand-over is
+# visible in a run that short: the replica is requested, and the traffic that
+# asked for it has gone before it arrives.
+#
+# A schedule that keeps arriving for longer than a cold start shows both halves.
+# One replica drowning while the second is built, and then the second one taking
+# a share of the traffic. Keep the rate above what a single replica can serve and
+# below what two can, or the queue either never builds or never drains.
+#
+# Examples:
+# > ./dot.nu generate load_cases
+# > ./dot.nu generate load_cases --rate 2 --duration-seconds 840
+def "main generate load_cases" [
+    --rate = 2                 # Requests per second
+    --duration-seconds = 840   # How long requests keep arriving
+    --max-tokens = 512         # Output limit per request
+    --output = "demo/autoscaling-sustained-cases.json"
+] {
+
+    let prompts = (open demo/batching-cases.json | get prompt)
+    let total = ($rate * $duration_seconds)
+    let interval = (1000 / $rate)
+
+    let cases = (
+        0..<$total | each {|i|
+            {
+                id: $"sustained-($i)"
+                send_after_ms: (($i * $interval) | into int)
+                prompt: ($prompts | get ($i mod ($prompts | length)))
+                max_tokens: $max_tokens
+            }
+        }
+    )
+
+    $cases | to json | save $output --force
+
+    print $"Wrote (ansi yellow_bold)($output)(ansi reset): ($total) requests at ($rate)/s over ($duration_seconds)s"
+
+}
+
 # Destroys the cluster created for the inference engine episode
 #
 # Deletes the cluster and everything setup created around it.
