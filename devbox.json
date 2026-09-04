@@ -8,6 +8,7 @@
     "google-cloud-sdk@570.0.0",
     "path:gcloud#google-cloud-sdk",
     "gh@2.97.0",
+    "bat@0.26.1",
     "jq@1.8.2",
     "curl@8.17.0",
     "hey@0.1.4",
@@ -22,7 +23,8 @@
     "init_hook": [
       "export PATH=\"$HOME/.local/bin:$PATH\"",
       "[ -n \"$USE_VALS\" ] && eval \"$(vals env -export -f .env.vals.yaml)\" || true",
-      "[ -f .env ] && source ./.env || true"
+      "[ -f .env ] && source ./.env || true",
+      "alias cat=\"bat --plain --paging never\""
     ],
     "scripts": {}
   }
