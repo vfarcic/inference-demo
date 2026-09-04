@@ -1,6 +1,6 @@
-Output "/Users/viktorfarcic/code/inference-demo/tmp/inference-autoscaling-screen-08-ingress-raw.mp4"
+Output "/Users/viktorfarcic/code/inference-demo/tmp/inference-autoscaling-screen-12-nodes-still-raw.mp4"
 Set Shell "bash"
-Set FontSize 41
+Set FontSize 32
 Set Width 1920
 Set Height 1080
 Set Padding 24
@@ -18,7 +18,7 @@ Enter
 Type "clear"
 Enter
 Show
-Type "cat demo/autoscaling-ingress.yaml"
+Type "kubectl get nodes"
 Sleep 500ms
 Enter
-Sleep 11s
+Sleep 7s

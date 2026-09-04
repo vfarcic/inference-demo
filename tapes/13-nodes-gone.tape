@@ -1,9 +1,10 @@
-Output "/Users/viktorfarcic/code/inference-demo/tmp/inference-autoscaling-screen-08-ingress-raw.mp4"
+Output "/Users/viktorfarcic/code/inference-demo/tmp/inference-autoscaling-screen-13-nodes-gone-raw.mp4"
 Set Shell "bash"
-Set FontSize 41
+Set FontSize 32
 Set Width 1920
 Set Height 1080
 Set Padding 24
+Set LineHeight 1.0
 Set Framerate 24
 Set TypingSpeed 10ms
 Set Theme { "name": "BlackOverlay", "background": "#000000", "foreground": "#f8f8f2", "cursor": "#f8f8f2", "selection": "#44475a", "black": "#000000", "red": "#ff5555", "green": "#50fa7b", "yellow": "#f1fa8c", "blue": "#8be9fd", "magenta": "#ff79c6", "cyan": "#8be9fd", "white": "#bfbfbf", "brightBlack": "#4d4d4d", "brightRed": "#ff6e67", "brightGreen": "#5af78e", "brightYellow": "#f4f99d", "brightBlue": "#caa9fa", "brightCyan": "#9aedfe", "brightMagenta": "#ff92d0", "brightWhite": "#ffffff" }
@@ -18,7 +19,7 @@ Enter
 Type "clear"
 Enter
 Show
-Type "cat demo/autoscaling-ingress.yaml"
+Type "kubectl get nodes"
 Sleep 500ms
 Enter
-Sleep 11s
+Sleep 8s
