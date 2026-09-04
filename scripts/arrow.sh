@@ -15,7 +15,10 @@
 # at one pointer at a time, not at an accumulating pile of them.
 #
 # TIP_X,TIP_Y is where the point lands, measured off a rendered frame rather
-# than computed from the font size. ANGLE_DEG is the direction the arrow travels
+# than computed from the font size. Put TIP_Y about six pixels BELOW the
+# bottom of the glyphs, not on the row's centre line: the sprite points up and
+# to the left, so a tip level with the text covers what it points at and reads
+# as too high. scripts/tape-rows.sh prints the right value as "tip". ANGLE_DEG is the direction the arrow travels
 # as it comes in, measured clockwise from east; the default of 135 brings it up
 # and to the left from the lower right.
 #
