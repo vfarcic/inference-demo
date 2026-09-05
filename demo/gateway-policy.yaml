@@ -1,0 +1,28 @@
+# This is the part an ordinary gateway cannot do. The model name lives in the
+# JSON body, not in the URL or a header, so path and header matching cannot see
+# it. The policy reads the body before routing happens and writes what it finds
+# into a header the HTTPRoute can then match on.
+#
+# The map also handles aliases: several names can resolve to the same base
+# model, which is how LoRA adapters get routed to the replica serving their base.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: inference-model-routing
+  namespace: inference
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: inference-gateway
+  traffic:
+    phase: PreRouting
+    transformation:
+      request:
+        set:
+          - name: X-Gateway-Base-Model-Name
+            value: |
+              {
+                "qwen3-8b": "qwen3-8b",
+                "qwen3-06b": "qwen3-06b"
+              }[string(json(request.body).model)]

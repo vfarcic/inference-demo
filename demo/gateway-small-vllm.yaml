@@ -1,0 +1,55 @@
+# A second, much smaller model. It exists so there is something to route
+# *between*: with one model, "which model did you ask for" is not a question.
+# Half a billion parameters against eight billion, so it loads in a fraction of
+# the time and leaves the interesting behaviour to the routing rather than to
+# the model.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-small
+  namespace: inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: small-model
+  template:
+    metadata:
+      labels:
+        app: small-model
+    spec:
+      enableServiceLinks: false
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.27.1
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+            - --served-model-name
+            - qwen3-06b
+            - --dtype
+            - bfloat16
+            - --max-model-len
+            - "8192"
+            # The big model asks for 90% of its card. This one shares a card
+            # with nothing, but a small ceiling keeps it honest about how little
+            # it needs.
+            - --gpu-memory-utilization
+            - "0.30"
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 80

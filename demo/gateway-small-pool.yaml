@@ -1,0 +1,22 @@
+# The second pool. Identical in shape to the first, pointing at different Pods
+# and a different picker. Two pools is what makes routing by model a question.
+apiVersion: "inference.networking.k8s.io/v1"
+kind: InferencePool
+metadata:
+  name: small-model
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: small-model-epp
+    app.kubernetes.io/version: "v0.9.0"
+spec:
+  targetPorts:
+  - number: 8000
+  appProtocol: "http"
+  selector:
+    matchLabels:
+      app: "small-model"
+  endpointPickerRef:
+    name: small-model-epp
+    port:
+      number: 9002
+    failureMode: FailOpen
