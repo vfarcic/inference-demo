@@ -687,6 +687,15 @@ def "main generate load_cases" [
 # Run it serially, because overlapping requests would let one warm the cache for
 # another and the cold samples would stop being cold.
 #
+# THE COLD MEASUREMENT IS SINGLE USE. The prefix cache outlives the run, so replaying
+# the same cases against a live engine measures nothing -- the second time, the cold
+# requests are cache hits too and cold and warm come out identical. Measured on
+# 2026-09-05: a first run separated 1700ms from 547ms, and an immediate replay of the
+# same file gave 544ms against 534ms, a ratio of 1.02. That is the same class of bug
+# as reusing a GPU node between engine comparisons, and it is silent -- the numbers
+# look plausible, they are just all warm. So every generation salts its prefixes by
+# default, and a retake means generating again rather than rerunning the file.
+#
 # Deploy `demo/vllm-16bit.yaml` for this, not the autoscaling manifest. It allows
 # 8192 tokens of context where the autoscaling one allows 4096, and a probe whose
 # whole point is a long prefix should not be fighting the context limit. The two
@@ -720,6 +729,12 @@ def "main generate prefix_cases" [
                                # prompt, many short questions.
     --max-tokens = 8           # Small on purpose. This times the first token, not
                                # generation.
+    --salt = ""                # Makes the prefixes unique to this generation.
+                               # Defaults to a timestamp, which is what you want:
+                               # the cache persists between runs, so a fresh salt is
+                               # the difference between measuring a cold start and
+                               # measuring nothing. Pass a fixed value only when
+                               # deliberately reproducing an earlier workload.
     --output = "demo/gateway-prefix-cases.json"
 ] {
 
@@ -744,6 +759,12 @@ def "main generate prefix_cases" [
 
     let sentence_count = ($sentences | length)
 
+    let run_salt = if $salt == "" {
+        (date now | format date "%Y%m%d%H%M%S")
+    } else {
+        $salt
+    }
+
     let cases = (
         0..<$prefixes
         | each {|k|
@@ -759,8 +780,11 @@ def "main generate prefix_cases" [
                 | str join "\n"
             )
 
+            # The salt sits in the opening line so it lands in the first cache
+            # block. Everything after that rehashes, so a new salt invalidates the
+            # whole prefix rather than only its tail.
             let prefix = ([
-                $"OPERATIONS HANDBOOK, REVISION ($k + 1)-($k * 17 + 3). Internal reference. Answer only from the text below."
+                $"OPERATIONS HANDBOOK ($run_salt), REVISION ($k + 1)-($k * 17 + 3). Internal reference. Answer only from the text below."
                 ""
                 ($body | str substring 0..<$prefix_chars)
             ] | str join "\n")
@@ -795,11 +819,11 @@ def "main generate prefix_cases" [
     let approx_tokens = (($sample / 4) | math round)
 
     print $"Wrote (ansi yellow_bold)($output)(ansi reset): ($cases | length) requests"
-    print $"  ($prefixes) cold, ($prefixes * $warm_per_prefix) warm, prompt ($sample) chars \(roughly ($approx_tokens) tokens\)"
+    print $"  ($prefixes) cold, ($prefixes * $warm_per_prefix) warm, prompt ($sample) chars \(roughly ($approx_tokens) tokens\), salt ($run_salt)"
     print ""
     print "Run it serially, then compare the two groups:"
     print $"  main run openai_load $URL --model qwen3-8b --cases ($output) --concurrency 1 --output tmp/gateway-prefix.json"
-    print "  open tmp/gateway-prefix.json | get requests | insert kind {|r| $r.case_id | split row '-' | first} | group-by kind | transpose kind rows | each {|g| {kind: $g.kind, n: ($g.rows | length), ttft_p50_ms: ($g.rows | get first_token_ms | math median | math round)}}"
+    print "  open tmp/gateway-prefix.json | get requests | insert kind {|r| $r.case_id | split row '-' | first} | group-by kind | transpose kind rows | each {|g| {kind: $g.kind, n: ($g.rows | length), ttft_p50_ms: ($g.rows | get ttft_ms | math median | math round)}}"
 
 }
 
