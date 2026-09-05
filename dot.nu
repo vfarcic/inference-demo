@@ -673,6 +673,124 @@ def "main generate load_cases" [
 
 }
 
+# Generates a prefix-cache probe workload
+#
+# Answers one question before the gateway episode commits to anything: does a long
+# shared prefix produce a time-to-first-token gap big enough to film? The gateway's
+# best case is a request landing on a replica that already holds the prefix, which
+# is exactly what sending the same prefix twice to one replica produces. So this
+# needs a single GPU and no routing at all. If cold and warm do not separate here,
+# no routing decision can separate them across replicas, and the cache-affinity beat
+# does not exist.
+#
+# vLLM enables automatic prefix caching by default, so nothing has to be turned on.
+# Run it serially, because overlapping requests would let one warm the cache for
+# another and the cold samples would stop being cold.
+#
+# Examples:
+# > main generate prefix_cases
+# > main run openai_load $"($BASE_URL)/v1/chat/completions" --model qwen3-8b --cases demo/gateway-prefix-cases.json --concurrency 1 --output tmp/gateway-prefix.json
+def "main generate prefix_cases" [
+    --prefix-chars = 12000     # Shared prefix size. Roughly four characters to a
+                               # token, so this is about 3000 tokens. It has to be
+                               # long enough that prefill dominates time to first
+                               # token; too short and the gap vanishes into noise,
+                               # which is the failure mode this probe exists to
+                               # catch early.
+    --prefixes = 3             # Distinct prefixes, and therefore cold samples. Each
+                               # opens with its own revision number so it shares no
+                               # leading tokens with the others -- a shared opening
+                               # would let the second prefix hit the first one's
+                               # cache and quietly stop being a cold measurement.
+    --warm-per-prefix = 3      # Repeats after each cold request. They reuse the
+                               # prefix and change only the trailing question, which
+                               # is the real shape of the thing: one long system
+                               # prompt, many short questions.
+    --max-tokens = 8           # Small on purpose. This times the first token, not
+                               # generation.
+    --output = "demo/gateway-prefix-cases.json"
+] {
+
+    let sentences = [
+        "Every service in the platform namespace declares a resource request, a liveness probe and an owner label."
+        "Requests that cross a trust boundary are logged with the caller identity and the decision that allowed them."
+        "Retention for audit records is thirteen months, after which they move to cold storage for a further five years."
+        "A change that touches a shared dependency requires a second reviewer from a different team than the author."
+        "Rollbacks are automatic when the error budget for a service is exhausted twice inside a single hour."
+        "Capacity reviews happen quarterly and consider both peak concurrency and the cost per served request."
+        "No workload may schedule onto an accelerator pool without a matching toleration and a documented justification."
+        "Secrets are mounted as projected volumes with a fifteen minute refresh, never baked into an image layer."
+        "An incident is declared when customer impact is confirmed, not when an alert fires, and the clock starts then."
+        "Deprecated interfaces stay available for two release cycles with a warning header on every response."
+        "Backups are restored into an isolated namespace monthly, because a backup nobody restores is a rumour."
+        "Traffic shifts move in five percent increments with a ten minute soak between each of them."
+        "Any dependency added to the base image is pinned by digest and recorded in the inventory the same day."
+        "On-call handover includes open incidents, silenced alerts and anything deliberately left broken over a weekend."
+        "Cost anomalies above twenty percent week over week are investigated before the next capacity review."
+        "A runbook that has not been executed in six months is treated as untested and flagged for a drill."
+    ]
+
+    let sentence_count = ($sentences | length)
+
+    let cases = (
+        0..<$prefixes
+        | each {|k|
+
+            # Rotating the starting sentence keeps the prefixes different all the
+            # way through rather than only in their first line.
+            let body = (
+                0..<600
+                | each {|i|
+                    let s = ($sentences | get ((($i * 3) + ($k * 5)) mod $sentence_count))
+                    $"($i + 1). ($s)"
+                }
+                | str join "\n"
+            )
+
+            let prefix = ([
+                $"OPERATIONS HANDBOOK, REVISION ($k + 1)-($k * 17 + 3). Internal reference. Answer only from the text below."
+                ""
+                ($body | str substring 0..<$prefix_chars)
+            ] | str join "\n")
+
+            let cold = [{
+                id: $"cold-($k)"
+                send_after_ms: 0
+                prompt: $"($prefix)\n\nQuestion: how long are audit records retained? Answer in one word."
+                max_tokens: $max_tokens
+            }]
+
+            let warm = (
+                0..<$warm_per_prefix
+                | each {|w|
+                    {
+                        id: $"warm-($k)-($w)"
+                        send_after_ms: 0
+                        prompt: $"($prefix)\n\nQuestion: name rule number ($w * 7 + 11) from the handbook. Answer in one word."
+                        max_tokens: $max_tokens
+                    }
+                }
+            )
+
+            $cold | append $warm
+        }
+        | flatten
+    )
+
+    $cases | to json | save $output --force
+
+    let sample = ($cases | first | get prompt | str length)
+    let approx_tokens = (($sample / 4) | math round)
+
+    print $"Wrote (ansi yellow_bold)($output)(ansi reset): ($cases | length) requests"
+    print $"  ($prefixes) cold, ($prefixes * $warm_per_prefix) warm, prompt ($sample) chars \(roughly ($approx_tokens) tokens\)"
+    print ""
+    print "Run it serially, then compare the two groups:"
+    print $"  main run openai_load $URL --model qwen3-8b --cases ($output) --concurrency 1 --output tmp/gateway-prefix.json"
+    print "  open tmp/gateway-prefix.json | get requests | insert kind {|r| $r.case_id | split row '-' | first} | group-by kind | transpose kind rows | each {|g| {kind: $g.kind, n: ($g.rows | length), ttft_p50_ms: ($g.rows | get first_token_ms | math median | math round)}}"
+
+}
+
 # Destroys the cluster created for the inference engine episode
 #
 # Deletes the cluster and everything setup created around it.
