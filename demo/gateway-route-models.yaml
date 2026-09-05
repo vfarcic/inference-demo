@@ -25,7 +25,7 @@ spec:
           kind: InferencePool
           name: silly-model
       timeouts:
-        request: 300s
+        request: 900s
     - matches:
         - path:
             type: PathPrefix
@@ -39,4 +39,4 @@ spec:
           kind: InferencePool
           name: small-model
       timeouts:
-        request: 300s
+        request: 900s

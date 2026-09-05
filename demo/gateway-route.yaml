@@ -20,7 +20,10 @@ spec:
         - path:
             type: PathPrefix
             value: /
-      # A cold replica can take minutes to answer. The default would turn that
-      # into a gateway timeout that looks like the model failing.
+      # This has to outlast a cold start, and 300s does not. Measured: with the
+      # model scaled to zero, a held request was answered at 320s and the route
+      # gave up at 300, returning a 504 that reads like the model failing when
+      # in fact the gateway held the request correctly and then stopped waiting.
+      # The autoscaling video measured cold starts near ten minutes.
       timeouts:
-        request: 300s
+        request: 900s

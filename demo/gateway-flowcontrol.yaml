@@ -1,0 +1,40 @@
+# Turning on flow control, which is what makes a request survive there being
+# nothing to serve it.
+#
+# Without this the gateway answers a request for a scaled-to-zero model with an
+# immediate 503 and the words "failed to find endpoint candidates". With it, the
+# picker queues the request in its own buffers and holds it while the autoscaler
+# provisions a Pod, then dispatches it when the model is ready.
+#
+# It is behind a feature gate, so it is off unless asked for. The plugin list is
+# the chart's default; the only addition is `featureGates`.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: silly-model-epp
+  namespace: inference
+data:
+  default-plugins.yaml: |
+    apiVersion: llm-d.ai/v1alpha1
+    kind: EndpointPickerConfig
+    featureGates:
+    - flowControl
+    plugins:
+    - type: queue-scorer
+    - type: kv-cache-utilization-scorer
+    - type: prefix-cache-scorer
+    - type: metrics-data-source
+      parameters:
+        scheme: "http"
+        path: "/metrics"
+        insecureSkipVerify: true
+    - type: core-metrics-extractor
+    schedulingProfiles:
+    - name: default
+      plugins:
+      - pluginRef: queue-scorer
+        weight: 2
+      - pluginRef: kv-cache-utilization-scorer
+        weight: 2
+      - pluginRef: prefix-cache-scorer
+        weight: 3
