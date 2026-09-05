@@ -15,8 +15,15 @@ def "main apply gateway_api" [
     --inference-version = "1.5.0"  # Gateway API Inference Extension release
 ] {
 
+    # `--force-conflicts` is not optional on GKE, and this is the one place the
+    # two clouds are not the same. Google ships its own Gateway API CRDs managed
+    # by kube-addon-manager, so a server-side apply of the upstream release
+    # collides on `.spec.versions` and the bundle-version annotation and exits
+    # non-zero. EKS has no built-in copy and does not care either way. The flag
+    # is what agentgateway's own install page prescribes; its inference-routing
+    # page omits it, which is how this was missed the first time.
     (
-        kubectl apply --server-side
+        kubectl apply --server-side --force-conflicts
             --filename $"https://github.com/kubernetes-sigs/gateway-api/releases/download/v($version)/standard-install.yaml"
     )
 
