@@ -2,17 +2,27 @@
 # vendored here so the cluster is built from plain manifests rather than a Helm
 # release resolved at run time.
 #
-# Setup applies this and the episode never shows it. Seven objects of service
+# Setup applies this and the episode never shows it. Eight objects of service
 # account, RBAC, config and Deployment are the picker's plumbing, in the same way
 # Flux and KEDA are plumbing: correct to have, not the subject. What the episode
 # does show is the InferencePool, which names this picker in four lines and is
 # where the intent actually lives.
+#
+# MEMORY IS OVERRIDDEN AND HAS TO BE. The chart requests 8Gi by default, which is
+# a sane production figure and does not fit the general node pool this series
+# runs -- e2-standard-2 has about 6Gi allocatable, the picker carries no GPU
+# toleration so it cannot land on a GPU node either, and the result is a Pod that
+# sits Pending forever while everything else looks healthy. 128Mi request against
+# a 512Mi limit is what the vendor's own guide uses and is ample for one pool of
+# three replicas; raise it for a large fleet, where the picker's index grows.
 #
 # Regenerate with:
 #   helm template silly-model oci://ghcr.io/llm-d/charts/llm-d-router-gateway \
 #     --version v0.9.0 --namespace inference \
 #     --set router.modelServers.matchLabels.app=silly-model \
 #     --set router.epp.resources.requests.cpu=100m \
+#     --set router.epp.resources.requests.memory=128Mi \
+#     --set router.epp.resources.limits.memory=512Mi \
 #     --set provider.name=none --set httpRoute.create=true \
 #     --set httpRoute.inferenceGatewayName=inference-gateway
 ---
@@ -213,10 +223,10 @@ spec:
           resources:
             
             limits:
-              memory: 16Gi
+              memory: 512Mi
             requests:
               cpu: 100m
-              memory: 8Gi
+              memory: 128Mi
           ports:
             - name: grpc
               containerPort: 9002

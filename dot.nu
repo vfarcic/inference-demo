@@ -242,10 +242,17 @@ def --env "main setup autoscaling" [
 # Three replicas is the point. Two would show that the picker made a choice;
 # three shows it ranking candidates. That is three GPU nodes.
 #
-# The endpoint picker is applied here rather than in the episode. It is seven
-# objects of service account, RBAC and config, and none of it is the subject --
-# same treatment as Flux and KEDA. The `InferencePool` that names it is applied
-# on camera, because that is where the intent lives.
+# Setup deliberately stops at the *before* state: three replicas behind an
+# ordinary Service and Ingress, spread by round-robin, which is what the episode
+# opens on. Nothing about routing is installed beyond the controllers.
+#
+# The picker and the InferencePool are applied on camera, and together, because
+# they are one unit. The picker watches for an InferencePool and reports
+# NOT_SERVING until it finds one, so applying it alone leaves a Pod
+# crashlooping -- measured 2026-09-05, seven restarts before the pool showed up
+# and it went healthy. The episode shows the pool, which says in twenty lines
+# which Pods are candidates and who chooses between them, and says in passing
+# that the picker's eight objects of RBAC and config are in the repo.
 #
 # Examples:
 # > ./dot.nu setup gateway google
@@ -275,8 +282,6 @@ def --env "main setup gateway" [
     main apply gateway_api
 
     main apply agentgateway
-
-    kubectl apply --filename demo/gateway-epp.yaml
 
     kubectl apply --filename demo/gateway-vllm.yaml
 
