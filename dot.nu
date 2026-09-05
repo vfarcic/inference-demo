@@ -6,6 +6,7 @@ source scripts/flux.nu
 source scripts/ingress.nu
 source scripts/openai-load.nu
 source scripts/keda.nu
+source scripts/gateway.nu
 
 # Each episode of the series gets its own `setup` and `destroy` subcommand.
 # Once an episode is published its command is frozen, since the video shows it.
@@ -30,6 +31,13 @@ const GPU_MAX_NODES = 1
 # holds exactly one copy of the model.
 const AUTOSCALING_GPU_MIN_NODES = 0
 const AUTOSCALING_GPU_MAX_NODES = 2
+# The gateway episode needs three replicas at once: two would show that a choice
+# happened, three shows the candidates being ranked. One L4 holds one copy of the
+# model, so three replicas is three nodes. The minimum stays zero because the
+# episode also lets the pool empty out to show requests being held with nothing
+# behind them.
+const GATEWAY_GPU_MIN_NODES = 0
+const GATEWAY_GPU_MAX_NODES = 3
 
 def main [] {}
 
@@ -221,6 +229,93 @@ def --env "main setup autoscaling" [
     }
 
     print $"(ansi green_bold)The always-on server is ready and warm.(ansi reset)"
+
+}
+
+# Creates the cluster used by the gateway episode
+#
+# Builds on the inference episode's cluster and adds what routing needs: the
+# Gateway API and Inference Extension CRDs, the agentgateway control plane, KEDA
+# for the beat where the pool empties out, and three replicas of the model
+# behind an ordinary Service.
+#
+# Three replicas is the point. Two would show that the picker made a choice;
+# three shows it ranking candidates. That is three GPU nodes.
+#
+# The endpoint picker is applied here rather than in the episode. It is seven
+# objects of service account, RBAC and config, and none of it is the subject --
+# same treatment as Flux and KEDA. The `InferencePool` that names it is applied
+# on camera, because that is where the intent lives.
+#
+# Examples:
+# > ./dot.nu setup gateway google
+# > ./dot.nu setup gateway aws
+def --env "main setup gateway" [
+    provider: string          # Cloud provider. `google` or `aws`
+    --billing-account = ""    # Billing account to link. Auto-detected when empty
+    --auth = true             # Whether to authenticate. Set to false if already logged in
+] {
+
+    (
+        main setup inference $provider --billing-account $billing_account
+            --auth $auth
+            --gpu-min-nodes $GATEWAY_GPU_MIN_NODES
+            --gpu-max-nodes $GATEWAY_GPU_MAX_NODES
+    )
+
+    main apply keda
+
+    # Google runs the cluster autoscaler in the GKE control plane. Nothing
+    # resizes an EKS node group unless this is installed, so a pending GPU Pod
+    # would wait forever instead of getting a node.
+    if $provider == "aws" {
+        main apply cluster_autoscaler --cluster-name $CLUSTER_NAME
+    }
+
+    main apply gateway_api
+
+    main apply agentgateway
+
+    kubectl apply --filename demo/gateway-epp.yaml
+
+    kubectl apply --filename demo/gateway-vllm.yaml
+
+    # Three replicas, three nodes to provision, and nine gigabytes of image to
+    # pull onto each. The wait is long the first time and the timeout reflects
+    # that rather than optimism.
+    (
+        kubectl --namespace inference rollout status deployment/vllm
+            --timeout 45m
+    )
+
+    print $"(ansi green_bold)Three replicas are serving. The gateway is installed but nothing routes through it yet.(ansi reset)"
+
+}
+
+# Destroys the cluster created for the gateway episode
+#
+# Examples:
+# > ./dot.nu destroy gateway google
+# > ./dot.nu destroy gateway aws
+def --env "main destroy gateway" [
+    provider: string   # Cloud provider. `google` or `aws`
+] {
+
+    if not ("KUBECONFIG" in $env) {
+        $env.KUBECONFIG = $"($env.PWD)/kubeconfig-($CLUSTER_NAME).yaml"
+    }
+
+    # The Gateway owns a cloud load balancer. Deleting it while the controller is
+    # still running means the balancer goes with it; leaving it to the cluster
+    # teardown can orphan one, and on AWS that survives the cluster.
+    do --ignore-errors {
+        (
+            kubectl --namespace inference delete gateway inference-gateway
+                --ignore-not-found=true --wait=true --timeout 10m
+        )
+    }
+
+    main destroy inference $provider
 
 }
 

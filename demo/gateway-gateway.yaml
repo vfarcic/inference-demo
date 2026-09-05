@@ -1,0 +1,14 @@
+# The Gateway itself. One listener, and the only line that matters is the class:
+# agentgateway rather than an ordinary Envoy or Traefik gateway, because this is
+# the one that can hand a request to an endpoint picker.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: inference-gateway
+  namespace: inference
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP

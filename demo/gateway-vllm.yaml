@@ -1,0 +1,82 @@
+# Three replicas of the same model, which is the smallest number that shows a
+# picker ranking candidates rather than flipping a coin. Each one holds a whole
+# L4, so this is three GPU nodes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: inference
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: silly-model
+      engine: vllm
+  template:
+    metadata:
+      labels:
+        app: silly-model
+        engine: vllm
+    spec:
+      enableServiceLinks: false
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      # One replica per node. Two on one node cannot happen anyway with a single
+      # card each, but stating it keeps the scheduler from surprising us if the
+      # pool shape ever changes.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: silly-model
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.27.1
+          args:
+            - --model
+            - Qwen/Qwen3-8B
+            - --served-model-name
+            - qwen3-8b
+            - --dtype
+            - bfloat16
+            # 8192 rather than the autoscaling episode's 4096. The cache
+            # affinity demo needs a shared prefix of several thousand tokens
+            # before prefill dominates time to first token, and a 4096 window
+            # leaves no room for one.
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 15
+            failureThreshold: 80
+---
+# The plain Service. The episode opens by sending traffic through this, because
+# round-robin across three replicas is the thing the gateway replaces, and it
+# has to be seen failing before the fix means anything.
+apiVersion: v1
+kind: Service
+metadata:
+  name: silly-model
+  namespace: inference
+spec:
+  selector:
+    app: silly-model
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

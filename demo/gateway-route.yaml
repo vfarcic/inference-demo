@@ -1,0 +1,26 @@
+# Routing to a pool rather than to a Service. `backendRefs` naming an
+# InferencePool is the only unusual line here; everything else is an ordinary
+# HTTPRoute.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: silly-model
+  namespace: inference
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: inference-gateway
+  rules:
+    - backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: silly-model
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+      # A cold replica can take minutes to answer. The default would turn that
+      # into a gateway timeout that looks like the model failing.
+      timeouts:
+        request: 300s

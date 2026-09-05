@@ -1,0 +1,23 @@
+# The whole idea in twenty lines. Which Pods are candidates (`selector`), what
+# port to reach them on, and who decides between them (`endpointPickerRef`).
+# Everything the episode demonstrates follows from that last field.
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata:
+  name: silly-model
+  namespace: inference
+spec:
+  targetPorts:
+    - number: 8000
+  appProtocol: http
+  selector:
+    matchLabels:
+      app: silly-model
+  endpointPickerRef:
+    name: silly-model-epp
+    port:
+      number: 9002
+    # If the picker is unreachable, keep serving and fall back to ordinary
+    # balancing rather than failing the request. The alternative is FailClose,
+    # which makes the picker a single point of failure for the whole pool.
+    failureMode: FailOpen
