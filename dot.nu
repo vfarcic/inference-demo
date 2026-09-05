@@ -687,16 +687,28 @@ def "main generate load_cases" [
 # Run it serially, because overlapping requests would let one warm the cache for
 # another and the cold samples would stop being cold.
 #
+# Deploy `demo/vllm-16bit.yaml` for this, not the autoscaling manifest. It allows
+# 8192 tokens of context where the autoscaling one allows 4096, and a probe whose
+# whole point is a long prefix should not be fighting the context limit. The two
+# also answer to different names on the API: `vllm-16bit.yaml` sets no
+# `--served-model-name`, so the model is `Qwen/Qwen3-8B`, while the autoscaling
+# manifest renames it to `qwen3-8b`. Passing the wrong one returns a 404 that looks
+# nothing like a model-name problem.
+#
 # Examples:
 # > main generate prefix_cases
-# > main run openai_load $"($BASE_URL)/v1/chat/completions" --model qwen3-8b --cases demo/gateway-prefix-cases.json --concurrency 1 --output tmp/gateway-prefix.json
+# > main run openai_load $"($BASE_URL)/v1/chat/completions" --model Qwen/Qwen3-8B --cases demo/gateway-prefix-cases.json --concurrency 1 --output tmp/gateway-prefix.json
 def "main generate prefix_cases" [
     --prefix-chars = 12000     # Shared prefix size. Roughly four characters to a
                                # token, so this is about 3000 tokens. It has to be
                                # long enough that prefill dominates time to first
                                # token; too short and the gap vanishes into noise,
                                # which is the failure mode this probe exists to
-                               # catch early.
+                               # catch early. It also has to fit inside the served
+                               # `--max-model-len` with room for the answer, and the
+                               # character-per-token ratio is an estimate rather than
+                               # a guarantee, so leave real margin rather than
+                               # filling the window.
     --prefixes = 3             # Distinct prefixes, and therefore cold samples. Each
                                # opens with its own revision number so it shares no
                                # leading tokens with the others -- a shared opening
