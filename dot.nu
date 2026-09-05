@@ -280,6 +280,12 @@ def --env "main setup gateway" [
 
     kubectl apply --filename demo/gateway-vllm.yaml
 
+    # The ordinary Ingress in front of the ordinary Service. This is what the
+    # episode opens on -- three replicas behind round-robin -- so it is the
+    # starting state rather than something the episode builds. `setup inference`
+    # generates the manifest but does not apply it.
+    kubectl apply --filename demo/ingress.yaml
+
     # Three replicas, three nodes to provision, and nine gigabytes of image to
     # pull onto each. The wait is long the first time and the timeout reflects
     # that rather than optimism.
