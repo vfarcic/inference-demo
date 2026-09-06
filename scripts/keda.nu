@@ -19,7 +19,12 @@ def "main apply keda" [
 
     helm repo add kedacore https://kedacore.github.io/charts
 
-    helm repo update
+    # Name the repo. A bare `helm repo update` refreshes every repo configured on
+    # the machine, so one unrelated and unreachable chart server -- and a
+    # developer box accumulates plenty -- fails the whole command and takes setup
+    # with it. Measured 2026-09-06: charts.dexidp.io timed out and killed an
+    # otherwise healthy run that had nothing to do with dex.
+    helm repo update kedacore
 
     (
         helm upgrade --install keda kedacore/keda
@@ -65,7 +70,8 @@ def "main apply cluster_autoscaler" [
 
     helm repo add autoscaler https://kubernetes.github.io/autoscaler
 
-    helm repo update
+    # Named for the same reason as the KEDA repo above.
+    helm repo update autoscaler
 
     (
         helm upgrade --install cluster-autoscaler autoscaler/cluster-autoscaler
