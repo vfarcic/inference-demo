@@ -38,6 +38,14 @@ const AUTOSCALING_GPU_MAX_NODES = 2
 # behind them.
 const GATEWAY_GPU_MIN_NODES = 0
 const GATEWAY_GPU_MAX_NODES = 3
+# Three GPU nodes at once is a much bigger ask than one, and GPU capacity on AWS
+# is per availability zone. Measured 2026-09-06: a pool pinned to us-east-1d got
+# its first node and then failed both others with InsufficientInstanceCapacity,
+# telling us in the error to try 1a, 1b, 1c or 1f. The cluster autoscaler was
+# working correctly the whole time -- it asked for 1->3 and EC2 refused. Spread
+# the pool so it can take capacity wherever it exists. Google is unaffected: the
+# earlier episodes ask for one node and get it.
+const GATEWAY_AWS_ZONES = "us-east-1a,us-east-1b,us-east-1c,us-east-1f"
 
 def main [] {}
 
@@ -56,6 +64,8 @@ def --env "main setup inference" [
     --auth = true             # Whether to authenticate. Set to false if already logged in
     --gpu-min-nodes = -1      # Smallest GPU pool size. Defaults to the series value
     --gpu-max-nodes = -1      # Largest GPU pool size. Defaults to the series value
+    --gpu-zones = ""          # Comma-separated AZs the GPU pool may use. AWS only.
+                              # Empty keeps one zone, as the earlier episodes use.
 ] {
 
     if not ($provider in ["google" "aws"]) {
@@ -89,6 +99,7 @@ def --env "main setup inference" [
 
     (
         main create gpu_nodes $provider --cluster-name $CLUSTER_NAME --zone $zone
+            --zones $gpu_zones
             --min-nodes $min_gpu --max-nodes $max_gpu
     )
 
@@ -268,6 +279,7 @@ def --env "main setup gateway" [
             --auth $auth
             --gpu-min-nodes $GATEWAY_GPU_MIN_NODES
             --gpu-max-nodes $GATEWAY_GPU_MAX_NODES
+            --gpu-zones $GATEWAY_AWS_ZONES
     )
 
     main apply keda

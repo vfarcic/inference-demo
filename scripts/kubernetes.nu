@@ -118,6 +118,11 @@ def --env "main create gpu_nodes" [
     --min-nodes = 0  # Minimum number of nodes. Zero enables scale to zero
     --max-nodes = 1  # Maximum number of nodes
     --zone = ""  # Zone for the pool. Defaults per provider
+    --zones = ""  # Comma-separated AZs the pool may use. AWS only. Empty keeps the
+                  # single zone from `--zone`, which is what the earlier episodes
+                  # do. Spread the pool when it needs several nodes at once: GPU
+                  # capacity is per-AZ, and a group pinned to one AZ fails with
+                  # InsufficientInstanceCapacity rather than trying elsewhere.
     --region = "us-east-1"  # Region the cluster lives in. AWS only
     --taint = true  # Whether to taint the pool so only GPU workloads schedule on it
 ] {
@@ -169,6 +174,14 @@ def --env "main create gpu_nodes" [
 
         let aws_zone = if $zone == "" { "us-east-1d" } else { $zone }
 
+        # One zone unless asked for more, so the published episodes behave
+        # exactly as their videos show.
+        let aws_zones = if $zones == "" {
+            [$aws_zone]
+        } else {
+            ($zones | split row "," | each {|z| $z | str trim })
+        }
+
         # eksctl installs the NVIDIA device plugin itself once it sees a GPU
         # instance type, so there is no driver argument to pass here.
         # The cluster autoscaler reads the Auto Scaling group's tags to work out
@@ -179,7 +192,7 @@ def --env "main create gpu_nodes" [
         mut node_group = {
             name: $name
             instanceType: $size
-            availabilityZones: [$aws_zone]
+            availabilityZones: $aws_zones
             minSize: $min_nodes
             maxSize: $max_nodes
             desiredCapacity: $num_nodes
