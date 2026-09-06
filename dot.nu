@@ -364,6 +364,13 @@ def --env "main destroy gateway" [
         )
     }
 
+    # And on AWS, wait on the thing that actually blocks the VPC rather than on a
+    # proxy for it. Google needs no equivalent: deleting the project takes
+    # everything with it.
+    if $provider == "aws" {
+        main wait elb_security_groups --cluster-name $CLUSTER_NAME
+    }
+
     main destroy inference $provider
 
 }
