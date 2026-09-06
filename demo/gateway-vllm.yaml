@@ -8,6 +8,15 @@ metadata:
   namespace: inference
 spec:
   replicas: 3
+  # The default is 600 seconds, and on AWS that is not enough. A GPU node has to
+  # be provisioned, and if the first availability zone is out of capacity the
+  # autoscaler retries elsewhere, which alone can eat several minutes. Then nine
+  # gigabytes of image, then the model. Measured 2026-09-06: the third replica
+  # came up fine and well past 600s, so the Deployment was marked
+  # ProgressDeadlineExceeded and `rollout status` reported failure on a cluster
+  # that was actually healthy. Worse, the condition is sticky, so every later
+  # `rollout status` returns the same error immediately.
+  progressDeadlineSeconds: 3600
   selector:
     matchLabels:
       app: silly-model
