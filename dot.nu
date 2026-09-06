@@ -335,13 +335,32 @@ def --env "main destroy gateway" [
         $env.KUBECONFIG = $"($env.PWD)/kubeconfig-($CLUSTER_NAME).yaml"
     }
 
-    # The Gateway owns a cloud load balancer. Deleting it while the controller is
-    # still running means the balancer goes with it; leaving it to the cluster
-    # teardown can orphan one, and on AWS that survives the cluster.
+    # The Gateway owns a cloud load balancer, and tearing the cluster down before
+    # the cloud controller has finished releasing it leaves debris behind.
+    #
+    # Deleting the Gateway resource is not enough on its own. The Gateway object
+    # disappears immediately while the Service it created, the load balancer
+    # behind that Service, and the security group the cloud controller made for
+    # the balancer are all still being cleaned up. Measured on AWS 2026-09-06:
+    # the balancer went, its `k8s-elb-*` security group did not, the leftover
+    # group held the VPC open, the VPC failed to delete, and the CloudFormation
+    # stack was left in DELETE_FAILED. Nothing showed up in a list of clusters,
+    # instances or load balancers -- so it looked clean -- and the next `setup`
+    # died on AlreadyExistsException.
+    #
+    # Waiting for the Service to disappear is the closest checkable proxy for the
+    # controller being done, so wait for that rather than for the Gateway.
     do --ignore-errors {
         (
             kubectl --namespace inference delete gateway inference-gateway
                 --ignore-not-found=true --wait=true --timeout 10m
+        )
+    }
+
+    do --ignore-errors {
+        (
+            kubectl --namespace inference wait --for=delete
+                service/inference-gateway --timeout 10m
         )
     }
 
