@@ -42,10 +42,17 @@ const GATEWAY_GPU_MAX_NODES = 3
 # is per availability zone. Measured 2026-09-06: a pool pinned to us-east-1d got
 # its first node and then failed both others with InsufficientInstanceCapacity,
 # telling us in the error to try 1a, 1b, 1c or 1f. The cluster autoscaler was
-# working correctly the whole time -- it asked for 1->3 and EC2 refused. Spread
-# the pool so it can take capacity wherever it exists. Google is unaffected: the
-# earlier episodes ask for one node and get it.
-const GATEWAY_AWS_ZONES = "us-east-1a,us-east-1b,us-east-1c,us-east-1f"
+# working correctly the whole time -- it asked for 1->3 and EC2 refused.
+#
+# THE POOL CAN ONLY USE ZONES THE CLUSTER HAS SUBNETS IN, which is the mistake
+# made on the first attempt at this fix: asking for the four zones EC2 suggested
+# failed immediately with "all public subnets from us-east-1a have been deleted",
+# because `main create kubernetes` builds the cluster across exactly two zones.
+# So this list has to stay a subset of those two. us-east-1c is the one EC2 named
+# as having capacity, so the pool spans both rather than betting on 1d alone.
+#
+# Google is unaffected: the earlier episodes ask for one node and get it.
+const GATEWAY_AWS_ZONES = "us-east-1c,us-east-1d"
 
 def main [] {}
 
