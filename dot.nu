@@ -318,7 +318,45 @@ def --env "main setup gateway" [
             --timeout 45m
     )
 
-    print $"(ansi green_bold)Three replicas are serving. The gateway is installed but nothing routes through it yet.(ansi reset)"
+    # The Gateway goes in here rather than on camera. The episode never explains it,
+    # it provisions a cloud load balancer that takes a while to answer -- about
+    # seventy-five seconds on AWS -- and that wait is better spent during setup than
+    # in the middle of a demo. Its address is what the episode sends traffic to, so
+    # export it the way INGRESS_HOST is exported.
+    #
+    # The HTTPRoute deliberately stays in the episode. It is the moment traffic stops
+    # going to the Service and starts going to the pool, which is that section's whole
+    # point, and applying it here would create a route whose backend does not exist yet.
+    kubectl apply --filename demo/gateway-gateway.yaml
+
+    (
+        kubectl --namespace inference wait gateway/inference-gateway
+            --for=condition=Programmed --timeout 10m
+    )
+
+    mut gateway_address = ""
+    mut waited = 0
+
+    loop {
+
+        let addr = (
+            kubectl --namespace inference get gateway inference-gateway
+                --output jsonpath='{.status.addresses[0].value}'
+            | complete
+        )
+
+        $gateway_address = (if $addr.exit_code == 0 { $addr.stdout | str trim } else { "" })
+
+        if ($gateway_address != "") or ($waited >= 600) { break }
+
+        sleep 10sec
+        $waited = $waited + 10
+
+    }
+
+    $"export GATEWAY_IP=($gateway_address)\n" | save --append .env
+
+    print $"(ansi green_bold)Three replicas are serving behind an ordinary Service. The gateway is up and nothing routes through it yet.(ansi reset)"
 
 }
 
