@@ -262,3 +262,43 @@ def "main run openai_load" [
     print $summary.total_latency
 
 }
+
+# Compares load runs side by side
+#
+# The gateway episode measures the same workload twice, once through the Ingress
+# and once through the gateway, and its whole argument is the difference between
+# them. Reading that difference off two twelve-row tables is not something anyone
+# can do while talking, so this reduces each run to the two numbers that carry
+# it: the median time to first token for requests meeting a document for the
+# first time, and for the repeats.
+#
+# Examples:
+# > main compare runs tmp/gateway-roundrobin.json tmp/gateway-picked.json --labels "ingress,gateway"
+def "main compare runs" [
+    ...files: string   # Load run reports to compare, in order
+    --labels = ""      # Comma-separated row labels. Defaults to the file names
+] {
+
+    if ($files | is-empty) {
+        print $"(ansi red_bold)Give it at least one report to read.(ansi reset)"
+        exit 1
+    }
+
+    let names = if $labels == "" {
+        $files | each {|f| $f | path basename | str replace ".json" "" }
+    } else {
+        $labels | split row "," | each {|l| $l | str trim }
+    }
+
+    (
+        $files | enumerate | each {|entry|
+            let requests = (open $entry.item | get requests)
+            {
+                run: ($names | get $entry.index)
+                cold: ($requests | where case_id =~ '^cold' | get ttft_ms | math median | math round)
+                warm: ($requests | where case_id =~ '^warm' | get ttft_ms | math median | math round)
+            }
+        }
+    )
+
+}
