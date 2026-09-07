@@ -302,3 +302,46 @@ def "main compare runs" [
     )
 
 }
+
+# Sends one request and reports only how it ended
+#
+# The load runner is the right tool for measuring a workload. This is for the
+# beats where the interesting thing is a single request's fate: refused, held,
+# or eventually answered. It prints the status code and the wall clock and
+# nothing else, so the difference between a refusal and a long wait is one line.
+#
+# Examples:
+# > main ask
+# > main ask --timeout 1500
+def "main ask" [
+    --url = ""                       # Endpoint. Defaults to the gateway from `.env`
+    --model = "qwen3-8b"             # Served model name
+    --prompt = "Are you awake?"      # What to send
+    --max-tokens = 10                # Output limit
+    --timeout = 75                   # Seconds to wait before giving up
+] {
+
+    mut endpoint = $url
+    if $endpoint == "" {
+        if not ("GATEWAY_IP" in $env) {
+            print $"(ansi red_bold)GATEWAY_IP is not set(ansi reset). Execute `source .env` first."
+            exit 1
+        }
+        $endpoint = $"http://($env.GATEWAY_IP)/v1/chat/completions"
+    }
+
+    let body = ({
+        model: $model
+        messages: [{role: "user", content: $prompt}]
+        max_tokens: $max_tokens
+    } | to json)
+
+    (
+        ^curl --silent --show-error --max-time $timeout $endpoint
+            --header "Content-Type: application/json"
+            --data $body
+            --output /dev/null
+            --write-out "http=%{http_code} time_total=%{time_total}s\n"
+    )
+
+}
