@@ -324,6 +324,11 @@ def --env "main setup gateway" [
             --timeout 45m
     )
 
+    (
+        kubectl --namespace inference rollout status deployment/vllm-small
+            --timeout 20m
+    )
+
     # The Gateway goes in here rather than on camera. The episode never explains it,
     # it provisions a cloud load balancer that takes a while to answer -- about
     # seventy-five seconds on AWS -- and that wait is better spent during setup than
