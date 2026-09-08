@@ -37,7 +37,13 @@ const AUTOSCALING_GPU_MAX_NODES = 2
 # episode also lets the pool empty out to show requests being held with nothing
 # behind them.
 const GATEWAY_GPU_MIN_NODES = 0
-const GATEWAY_GPU_MAX_NODES = 3
+const GATEWAY_GPU_MAX_NODES = 4
+# Four, not three. Three carry the replicas of the big model that every routing
+# beat measures against; the fourth carries the small model the episode adds when
+# it moves from "which replica" to "which model". Sizing the pool to three meant
+# scaling the big model down mid-episode to free a card, which put a paragraph of
+# resource juggling in the middle of a beat about routing and taught nothing.
+#
 # Three GPU nodes at once is a much bigger ask than one, and GPU capacity on AWS
 # is per availability zone. Measured 2026-09-06: a pool pinned to us-east-1d got
 # its first node and then failed both others with InsufficientInstanceCapacity,
