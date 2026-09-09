@@ -22,7 +22,9 @@
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
-  name: vllm
+  # Named after what it scales, not after the model it serves. The main
+  # `vllm` Deployment is deliberately not managed by any ScaledObject.
+  name: vllm-cold
   namespace: inference
 spec:
   scaleTargetRef:
