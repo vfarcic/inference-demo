@@ -1,0 +1,42 @@
+# Scale the model up because a request is waiting for it.
+#
+# This is the half of the request-holding beat that makes it mean anything. The
+# gateway holding a request at zero replicas is only useful if the hold is what
+# wakes the model up; a human typing `kubectl scale` proves the gateway can
+# wait, not that anything in production would ever answer.
+#
+# `llm_d_epp_flow_control_queue_size` is the endpoint picker's own gauge of how
+# many requests are sitting in its queue. It is non-zero exactly when the
+# gateway is holding something with nothing to serve it, which is the signal we
+# want and which no model-server metric can provide, because at zero replicas
+# there is no model server to ask.
+#
+# KEDA's metrics-api scaler reads a Prometheus-format endpoint directly, so this
+# needs no Prometheus server, no ServiceMonitor and no scrape config. It talks to
+# the picker's metrics port.
+#
+# APPLY THIS ONLY AT THAT BEAT, never during setup. It owns the replica count of
+# the `vllm` Deployment while it exists, and every earlier measurement in the
+# episode depends on that Deployment sitting at exactly three replicas.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vllm
+  namespace: inference
+spec:
+  scaleTargetRef:
+    name: vllm
+  minReplicaCount: 0
+  maxReplicaCount: 1
+  # Defaults are 30s polling and a 300s cooldown. On camera that is up to half a
+  # minute of nothing happening before the scale-up even starts, on top of a cold
+  # start already measured near five minutes.
+  pollingInterval: 5
+  cooldownPeriod: 60
+  triggers:
+    - type: metrics-api
+      metadata:
+        url: "http://silly-model-epp.inference.svc.cluster.local:9090/metrics"
+        format: prometheus
+        valueLocation: llm_d_epp_flow_control_queue_size
+        targetValue: "1"
