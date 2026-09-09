@@ -1,3 +1,60 @@
+---
+# The picker's /metrics port is not open. controller-runtime puts an
+# authn/authz filter in front of it, so KEDA needs a bearer token and the
+# identity behind that token needs to be allowed to GET /metrics.
+#
+# Measured 2026-09-10: without this KEDA logs `api returned 401` every five
+# seconds and the ScaledObject sits at `Ready=False, TriggerError`.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: keda-epp-metrics
+  namespace: inference
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: epp-metrics-reader
+rules:
+  # /metrics is a non-resource URL, so this cannot be a namespaced Role.
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: epp-metrics-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: epp-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: keda-epp-metrics
+    namespace: inference
+---
+# A long-lived token for that ServiceAccount. `kubectl create token` mints one
+# that expires; KEDA reads a Secret, so the Secret has to be the durable kind.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keda-epp-metrics
+  namespace: inference
+  annotations:
+    kubernetes.io/service-account.name: keda-epp-metrics
+type: kubernetes.io/service-account-token
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: epp-metrics
+  namespace: inference
+spec:
+  secretTargetRef:
+    - parameter: bearerToken
+      name: keda-epp-metrics
+      key: token
+---
 # Scale the model up because a request is waiting for it.
 #
 # This is the half of the request-holding beat that makes it mean anything. The
@@ -43,3 +100,6 @@ spec:
         format: prometheus
         valueLocation: llm_d_epp_flow_control_queue_size
         targetValue: "1"
+        authModes: bearer
+      authenticationRef:
+        name: epp-metrics

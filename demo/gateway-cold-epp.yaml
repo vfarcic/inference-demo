@@ -243,3 +243,20 @@ spec:
         - name: plugins-config-volume
           configMap:
             name: cold-model-epp
+---
+# The metrics port delegates authentication to the API server, which means the
+# picker itself has to be allowed to create TokenReviews. Without this, every
+# request to /metrics fails: 401 unauthenticated, and 500 WITH a valid token,
+# because the picker cannot check it. Measured 2026-09-10.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cold-model-epp-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: cold-model-epp
+    namespace: inference
