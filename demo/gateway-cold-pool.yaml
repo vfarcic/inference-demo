@@ -1,0 +1,23 @@
+# The third pool, pointing at a Deployment that is scaled to zero. A pool with
+# no endpoints is still a perfectly valid pool; it just has nothing to pick
+# until something asks for the model it serves.
+apiVersion: "inference.networking.k8s.io/v1"
+kind: InferencePool
+metadata:
+  name: cold-model
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: cold-model-epp
+    app.kubernetes.io/version: "v0.9.0"
+spec:
+  targetPorts:
+  - number: 8000
+  appProtocol: "http"
+  selector:
+    matchLabels:
+      app: "cold-model"
+  endpointPickerRef:
+    name: cold-model-epp
+    port:
+      number: 9002
+    failureMode: FailOpen

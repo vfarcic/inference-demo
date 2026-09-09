@@ -1,0 +1,64 @@
+# A third model, and it never runs until somebody asks for it.
+#
+# Same weights as the first, deployed separately and left at zero replicas. It
+# is not here to be a different model; it is here to be a model that nobody has
+# asked for yet, which is what a scale-to-zero deployment looks like on any
+# normal Tuesday. Waking it is a real cold start: rent a GPU node, pull a nine
+# gigabyte image onto it, load eight billion parameters.
+#
+# `replicas: 0` is the starting state and KEDA owns the field from then on. See
+# gateway-cold-scaledobject.yaml for what scales it and what it scales on.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-cold
+  namespace: inference
+spec:
+  replicas: 0
+  # A cold start here is node provisioning plus image pull plus weight load. The
+  # default 600s deadline is not close to enough; see the AWS notes in dot.nu.
+  progressDeadlineSeconds: 3600
+  selector:
+    matchLabels:
+      app: cold-model
+      engine: vllm
+  template:
+    metadata:
+      labels:
+        app: cold-model
+        engine: vllm
+    spec:
+      enableServiceLinks: false
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.27.1
+          args:
+            - --model
+            - Qwen/Qwen3-8B
+            # The name callers put in the request body. Distinct from the first
+            # pool's `qwen3-8b`, which is how the route tells them apart.
+            - --served-model-name
+            - qwen3-8b-cold
+            - --dtype
+            - bfloat16
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 15
+            failureThreshold: 80

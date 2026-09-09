@@ -3,8 +3,13 @@
 # it. The policy reads the body before routing happens and writes what it finds
 # into a header the HTTPRoute can then match on.
 #
-# The map also handles aliases: several names can resolve to the same base
-# model, which is how LoRA adapters get routed to the replica serving their base.
+# Upstream examples wrap this in a map from request name to base model, which
+# buys aliasing: several names resolving to one model, which is how LoRA
+# adapters reach the replica already serving their base. We pass the name
+# through instead. Two reasons. The map reads as an identity map to anyone
+# seeing it once, and explaining why it is not costs a paragraph the episode
+# does not have. And a literal map has to list every servable name, so a third
+# pool means editing a file the video already showed on camera.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
@@ -21,8 +26,4 @@ spec:
       request:
         set:
           - name: X-Gateway-Base-Model-Name
-            value: |
-              {
-                "qwen3-8b": "qwen3-8b",
-                "qwen3-06b": "qwen3-06b"
-              }[string(json(request.body).model)]
+            value: string(json(request.body).model)

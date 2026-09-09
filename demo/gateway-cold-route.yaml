@@ -1,0 +1,38 @@
+# The route rule for the pool that sits at zero.
+#
+# Its own HTTPRoute rather than a third rule in gateway-route-models.yaml, and
+# that is deliberate: the episode applies that file on camera and explains it as
+# one rule per pool, so a rule for a model the viewer has not met yet would be a
+# question with no answer. Gateway API is happy to have several routes on one
+# gateway.
+#
+# This matches the header the AgentgatewayPolicy writes from the request body,
+# exactly like the other rules do. It therefore matches nothing until that
+# policy is applied, which is fine: nothing asks for this model until then.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: cold-model
+  namespace: inference
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/
+          headers:
+            - type: Exact
+              name: X-Gateway-Base-Model-Name
+              value: qwen3-8b-cold
+      backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: cold-model
+      # This has to outlast a cold start that includes renting a node. The
+      # autoscaling episode measured close to ten minutes on this model.
+      timeouts:
+        request: 1500s

@@ -15,9 +15,10 @@
 # needs no Prometheus server, no ServiceMonitor and no scrape config. It talks to
 # the picker's metrics port.
 #
-# APPLY THIS ONLY AT THAT BEAT, never during setup. It owns the replica count of
-# the `vllm` Deployment while it exists, and every earlier measurement in the
-# episode depends on that Deployment sitting at exactly three replicas.
+# Applied during setup, and it owns the replica count of `vllm-cold` from then
+# on. That Deployment starts at zero and stays there until a request is queued
+# for it, so setup pays nothing for it. It deliberately does NOT touch `vllm`,
+# whose three replicas every earlier measurement in the episode depends on.
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
@@ -25,7 +26,7 @@ metadata:
   namespace: inference
 spec:
   scaleTargetRef:
-    name: vllm
+    name: vllm-cold
   minReplicaCount: 0
   maxReplicaCount: 1
   # Defaults are 30s polling and a 300s cooldown. On camera that is up to half a
@@ -36,7 +37,7 @@ spec:
   triggers:
     - type: metrics-api
       metadata:
-        url: "http://silly-model-epp.inference.svc.cluster.local:9090/metrics"
+        url: "http://cold-model-epp.inference.svc.cluster.local:9090/metrics"
         format: prometheus
         valueLocation: llm_d_epp_flow_control_queue_size
         targetValue: "1"

@@ -1,5 +1,5 @@
-# Turning on flow control, which is what makes a request survive there being
-# nothing to serve it.
+# Turning on flow control for the picker in front of the scaled-to-zero pool,
+# which is what makes a request survive there being nothing to serve it.
 #
 # Without this the gateway answers a request for a scaled-to-zero model with an
 # immediate 503 and the words "failed to find endpoint candidates". With it, the
@@ -11,7 +11,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: silly-model-epp
+  name: cold-model-epp
   namespace: inference
 data:
   default-plugins.yaml: |

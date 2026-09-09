@@ -37,7 +37,10 @@ const AUTOSCALING_GPU_MAX_NODES = 2
 # episode also lets the pool empty out to show requests being held with nothing
 # behind them.
 const GATEWAY_GPU_MIN_NODES = 0
-const GATEWAY_GPU_MAX_NODES = 4
+# Five, not four. Three replicas of the big model, one of the small one, and one
+# more for the scaled-to-zero pool when a held request finally wakes it. The
+# fifth is rented only for that beat and only for as long as it runs.
+const GATEWAY_GPU_MAX_NODES = 5
 # Four, not three. Three carry the replicas of the big model that every routing
 # beat measures against; the fourth carries the small model the episode adds when
 # it moves from "which replica" to "which model". Sizing the pool to three meant
@@ -310,6 +313,31 @@ def --env "main setup gateway" [
 
     kubectl apply --filename demo/gateway-vllm.yaml
 
+    # The second model, and the third. Both are setup rather than episode: the
+    # video routes between them and never deploys either, because the subject is
+    # routing. Their pickers and pools come with them -- an EPP crashloops if its
+    # InferencePool is missing, so those are never applied separately.
+    #
+    # The first model's picker and pool are deliberately NOT here. Applying them
+    # is the moment traffic stops going to a Service and starts going to a pool,
+    # which is a whole section of the episode.
+    (
+        kubectl apply
+            --filename demo/gateway-small-vllm.yaml
+            --filename demo/gateway-small-epp.yaml
+            --filename demo/gateway-small-pool.yaml
+    )
+
+    # The third model is deployed at zero replicas and stays there. It costs no
+    # GPU until a request is queued for it, which is the beat it exists for.
+    (
+        kubectl apply
+            --filename demo/gateway-cold-vllm.yaml
+            --filename demo/gateway-cold-epp.yaml
+            --filename demo/gateway-cold-pool.yaml
+            --filename demo/gateway-cold-scaledobject.yaml
+    )
+
     # The ordinary Ingress in front of the ordinary Service. This is what the
     # episode opens on -- three replicas behind round-robin -- so it is the
     # starting state rather than something the episode builds. `setup inference`
@@ -339,6 +367,14 @@ def --env "main setup gateway" [
     # going to the Service and starts going to the pool, which is that section's whole
     # point, and applying it here would create a route whose backend does not exist yet.
     kubectl apply --filename demo/gateway-gateway.yaml
+
+    # The scaled-to-zero pool's route. Its own HTTPRoute rather than a rule in
+    # the one the episode applies on camera, so that file stays two rules and
+    # two models. It matches on the header the AgentgatewayPolicy writes, so it
+    # matches nothing until the episode applies that policy, which is fine --
+    # nothing asks for this model before then. Applied after the Gateway so it
+    # has a parent to attach to.
+    kubectl apply --filename demo/gateway-cold-route.yaml
 
     (
         kubectl --namespace inference wait gateway/inference-gateway
