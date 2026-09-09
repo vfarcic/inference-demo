@@ -34,5 +34,9 @@ spec:
           name: cold-model
       # This has to outlast a cold start that includes renting a node. The
       # autoscaling episode measured close to ten minutes on this model.
+      #
+      # Whatever calls this must wait LONGER than this number, or the two race
+      # and a slow cold start returns whichever gave up first, with no way to
+      # tell them apart from the result. The episode's curl uses 1800.
       timeouts:
         request: 1500s
