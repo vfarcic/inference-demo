@@ -1,15 +1,8 @@
-# This is the part an ordinary gateway cannot do. The model name lives in the
-# JSON body, not in the URL or a header, so path and header matching cannot see
-# it. The policy reads the body before routing happens and writes what it finds
-# into a header the HTTPRoute can then match on.
-#
-# Upstream examples wrap this in a map from request name to base model, which
-# buys aliasing: several names resolving to one model, which is how LoRA
-# adapters reach the replica already serving their base. We pass the name
-# through instead. Two reasons. The map reads as an identity map to anyone
-# seeing it once, and explaining why it is not costs a paragraph the episode
-# does not have. And a literal map has to list every servable name, so a third
-# pool means editing a file the video already showed on camera.
+# The part an ordinary gateway cannot do: the model name lives in the JSON
+# body, so path and header matching cannot see it. This reads the body before
+# routing and writes what it finds into a header the HTTPRoute can match on.
+# Upstream wraps the value in a name-to-model map, which buys LoRA aliasing;
+# we pass the name through. See the manuscript notes for why.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
