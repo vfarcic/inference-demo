@@ -430,14 +430,24 @@ def "main compare counters" [
     # Long enough that the prefix cache has whole blocks to match on. A short
     # prompt may not fill one, and then identical requests scatter for reasons
     # that have nothing to do with routing.
+    # One shared body for the identical burst.
     let filler = (1..40 | each {|| "The operator manual describes the procedure in detail. " } | str join)
+
+    # And a DIFFERENT body per request for the distinct burst. Varying only the
+    # question at the end is not enough: the prompts would still share 2000
+    # characters of prefix, the cache scorer would route them all to whichever
+    # replica holds it, and the burst that is supposed to spread would land in
+    # one place. The difference has to start at the first token.
+    let distinct = (1..$count | each {|i|
+        1..40 | each {|| $"Chapter ($i) covers procedure ($i) and its exceptions in full. " } | str join
+    })
 
     let t0 = (do $read)
     do $send (1..$count | each {|| $"($filler)Summarise the procedure." })
     let t1 = (do $read)
     do $report $"($count) identical prompts" $t0 $t1
 
-    do $send (1..$count | each {|i| $"($filler)Question ($i): what does step ($i) require?" })
+    do $send ($distinct | enumerate | each {|e| $"($e.item)Question ($e.index): what does it require?" })
     let t2 = (do $read)
     do $report $"($count) distinct prompts" $t1 $t2
 
