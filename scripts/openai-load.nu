@@ -69,6 +69,11 @@ def "main run openai_load" [
     --concurrency = 0         # Client workers. Zero uses one worker per case
     --seed = 42               # Base deterministic model seed
     --output = ""             # Optional JSON report path
+    --brief                   # Print one line per request and the cold/warm
+                              # medians, instead of the four summary tables.
+                              # The tables do not fit on a recording terminal
+                              # alongside the rows, and the rows are what the
+                              # gateway episode reads out loud.
 ] {
 
     if $model == "" {
@@ -254,12 +259,36 @@ def "main run openai_load" [
         $report | to json --indent 2 | save --force $output
     }
 
-    print ($results | select case_id send_after_ms first_token_ms finish_ms)
-    print ($summary | reject ttft total_latency)
-    print "TTFT (milliseconds)"
-    print $summary.ttft
-    print "Total latency (milliseconds)"
-    print $summary.total_latency
+    if $brief {
+
+        # One line per request and nothing else, then the two numbers the
+        # comparison turns on. The full report is four tables and roughly thirty
+        # rows, which scrolls the per-request lines off a recording terminal --
+        # and those lines are the point when the argument is *which replica*
+        # served a repeat rather than how the suite performed overall.
+        for r in $results {
+            # `first_token_ms` is an offset from the start of the suite, not a
+            # latency -- printing it gives a column that climbs monotonically
+            # and means nothing. `ttft_ms` is the per-request measurement.
+            let ms = ($r.ttft_ms | math round --precision 1)
+            print $"  ($r.case_id | fill --width 12)ttft=($ms | fill --width 8 --alignment right) ms"
+        }
+        print ""
+        let cold = ($results | where case_id =~ '^cold' | get ttft_ms)
+        let warm = ($results | where case_id =~ '^warm' | get ttft_ms)
+        print $"cold  median ($cold | math median | math round) ms"
+        print $"warm  median ($warm | math median | math round) ms"
+
+    } else {
+
+        print ($results | select case_id send_after_ms first_token_ms finish_ms)
+        print ($summary | reject ttft total_latency)
+        print "TTFT (milliseconds)"
+        print $summary.ttft
+        print "Total latency (milliseconds)"
+        print $summary.total_latency
+
+    }
 
 }
 
