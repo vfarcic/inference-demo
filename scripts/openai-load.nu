@@ -374,3 +374,71 @@ def "main ask" [
     )
 
 }
+
+# Counts how many requests each replica actually served, around two bursts
+#
+# The affinity beats measure *time*; this measures *placement*. Read the
+# per-replica success counters, send a burst, read them again, and print the
+# difference. Six identical prompts should land on one replica because they
+# share a prefix; six different ones should spread, because they share nothing.
+#
+# It exists because the manuscript used to show a bare `kubectl exec` loop over
+# the counters and then an output the loop could not produce -- the before/after
+# arithmetic lived in a scratch script that was never committed.
+#
+# Examples:
+# > main compare counters $"http://($env.GATEWAY_IP)/v1/chat/completions"
+def "main compare counters" [
+    url: string                      # Endpoint to send the bursts to
+    --model = "qwen3-8b"             # Served model name
+    --namespace = "inference"        # Namespace holding the replicas
+    --selector = "app=silly-model"   # Label selector for the replicas
+    --count = 6                      # Requests per burst
+] {
+
+    # vLLM publishes a success counter per replica. Summing the labelled series
+    # gives one number per Pod, which is all this needs.
+    let read = {||
+        ^kubectl --namespace $namespace get pods --selector $selector --output name
+        | lines
+        | each {|p|
+            let name = ($p | split row "/" | last)
+            let raw = (^kubectl --namespace $namespace exec $p -- sh -c "curl -s localhost:8000/metrics | grep '^vllm:request_success_total' | awk '{s+=$2} END {print s+0}'")
+            {pod: $name, n: ($raw | str trim | into int)}
+        }
+        | sort-by pod
+    }
+
+    let send = {|prompts|
+        for p in $prompts {
+            let body = ({model: $model, messages: [{role: "user", content: $p}], max_tokens: 5} | to json)
+            (^curl --silent --show-error --max-time 300 $url
+                --header "Content-Type: application/json"
+                --data $body --output /dev/null)
+        }
+    }
+
+    let report = {|label, before, after|
+        print $"--- ($label) ---"
+        for b in $before {
+            let a = ($after | where pod == $b.pod | get n | first)
+            print $"  ($b.pod | fill --width 24)+($a - $b.n)"
+        }
+        print ""
+    }
+
+    # Long enough that the prefix cache has whole blocks to match on. A short
+    # prompt may not fill one, and then identical requests scatter for reasons
+    # that have nothing to do with routing.
+    let filler = (1..40 | each {|| "The operator manual describes the procedure in detail. " } | str join)
+
+    let t0 = (do $read)
+    do $send (1..$count | each {|| $"($filler)Summarise the procedure." })
+    let t1 = (do $read)
+    do $report $"($count) identical prompts" $t0 $t1
+
+    do $send (1..$count | each {|i| $"($filler)Question ($i): what does step ($i) require?" })
+    let t2 = (do $read)
+    do $report $"($count) distinct prompts" $t1 $t2
+
+}
